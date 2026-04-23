@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test API - Scraper de Propiedades</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        h1 {
+            color: #667eea;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 40px;
+        }
+        
+        .form-section {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        input[type="text"] {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        button {
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            display: none;
+        }
+        
+        .loading.active {
+            display: block;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .result {
+            display: none;
+            margin-top: 30px;
+        }
+        
+        .result.active {
+            display: block;
+        }
+        
+        .property-card {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+        
+        .property-header {
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .property-title {
+            font-size: 2em;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .property-location {
+            color: #666;
+            font-size: 1.1em;
+            margin-bottom: 10px;
+        }
+        
+        .property-price {
+            font-size: 2em;
+            color: #667eea;
+            font-weight: bold;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 5px 15px;
+            background: #4ade80;
+            color: white;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        
+        .property-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .detail-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+        }
+        
+        .detail-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .detail-value {
+            font-size: 1.1em;
+            color: #333;
+            font-weight: 600;
+        }
+        
+        .property-description {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            line-height: 1.6;
+            color: #555;
+        }
+        
+        .property-images {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .property-image {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+        
+        .property-image:hover {
+            transform: scale(1.05);
+        }
+        
+        .error {
+            background: #fee;
+            border: 2px solid #fcc;
+            color: #c33;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        
+        .success {
+            background: #efe;
+            border: 2px solid #cfc;
+            color: #3c3;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        
+        .agent-info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        
+        .agent-info h3 {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏠 Test API - Scraper de Propiedades</h1>
+        <p class="subtitle">Prueba la API desde el navegador</p>
+        
+        <div class="form-section">
+            <h2>🔍 Scrapear Propiedad</h2>
+            <div class="input-group">
+                <input 
+                    type="text" 
+                    id="urlInput" 
+                    placeholder="https://paraisodorado.com.mx/es/propiedad/..."
+                    value="https://paraisodorado.com.mx/es/propiedad/porpiedad-en-playa-sur-id273"
+                >
+                <button id="btnScrapear" onclick="scrapearPropiedad()">
+                    🚀 Scrapear
+                </button>
+            </div>
+            
+            <button onclick="listarPropiedades()" style="margin-right: 10px;">
+                📋 Listar Propiedades
+            </button>
+            <button onclick="verEstadisticas()">
+                📊 Ver Estadísticas
+            </button>
+        </div>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Scrapeando propiedad... Esto puede tomar unos segundos.</p>
+        </div>
+        
+        <div id="result" class="result"></div>
+    </div>
+    
+    <script>
+        const API_URL = 'http://localhost:8000';
+        
+        // Scrapear una propiedad
+        async function scrapearPropiedad() {
+            const url = document.getElementById('urlInput').value;
+            const btnScrapear = document.getElementById('btnScrapear');
+            const loading = document.getElementById('loading');
+            const result = document.getElementById('result');
+            
+            if (!url) {
+                mostrarError('Por favor ingresa una URL');
+                return;
+            }
+            
+            try {
+                // Mostrar loading
+                loading.classList.add('active');
+                result.classList.remove('active');
+                btnScrapear.disabled = true;
+                btnScrapear.textContent = '⏳ Scrapeando...';
+                
+                // Hacer request
+                const response = await fetch(`${API_URL}/scrape`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url: url })
+                });
+                
+                const data = await response.json();
+                
+                // Ocultar loading
+                loading.classList.remove('active');
+                btnScrapear.disabled = false;
+                btnScrapear.textContent = '🚀 Scrapear';
+                
+                if (data.success) {
+                    mostrarPropiedad(data.data);
+                } else {
+                    mostrarError(data.message || 'Error al scrapear');
+                }
+                
+            } catch (error) {
+                loading.classList.remove('active');
+                btnScrapear.disabled = false;
+                btnScrapear.textContent = '🚀 Scrapear';
+                mostrarError('Error de conexión: ' + error.message);
+            }
+        }
+        
+        // Mostrar propiedad
+        function mostrarPropiedad(propiedad) {
+            const result = document.getElementById('result');
+            result.classList.add('active');
+            
+            const imagenesHTML = propiedad.imagenes_urls?.map(img => 
+                `<img class="property-image" src="${API_URL}${img}" alt="Imagen propiedad" onclick="window.open('${API_URL}${img}', '_blank')">`
+            ).join('') || '<p>No hay imágenes disponibles</p>';
+            
+            result.innerHTML = `
+                <div class="success">
+                    ✅ Propiedad scrapeada exitosamente
+                </div>
+                
+                <div class="property-card">
+                    <div class="property-header">
+                        <div class="property-title">
+                            ${propiedad.titulo || 'Sin título'}
+                            ${propiedad.estado ? `<span class="badge">${propiedad.estado}</span>` : ''}
+                        </div>
+                        <div class="property-location">📍 ${propiedad.ubicacion || 'Sin ubicación'}</div>
+                        <div class="property-price">💰 ${propiedad.precio || 'Sin precio'}</div>
+                    </div>
+                    
+                    <div class="property-details">
+                        <div class="detail-item">
+                            <div class="detail-label">Empresa</div>
+                            <div class="detail-value">${propiedad.empresa || 'N/A'}</div>
+                        </div>
+                        ${propiedad.terreno?.superficie ? `
+                        <div class="detail-item">
+                            <div class="detail-label">Superficie</div>
+                            <div class="detail-value">${propiedad.terreno.superficie}</div>
+                        </div>
+                        ` : ''}
+                        ${propiedad.terreno?.frente ? `
+                        <div class="detail-item">
+                            <div class="detail-label">Frente</div>
+                            <div class="detail-value">${propiedad.terreno.frente}</div>
+                        </div>
+                        ` : ''}
+                        ${propiedad.terreno?.fondo ? `
+                        <div class="detail-item">
+                            <div class="detail-label">Fondo</div>
+                            <div class="detail-value">${propiedad.terreno.fondo}</div>
+                        </div>
+                        ` : ''}
+                    </div>
+                    
+                    ${propiedad.agente?.nombre ? `
+                    <div class="agent-info">
+                        <h3>👤 Agente</h3>
+                        <p><strong>${propiedad.agente.nombre}</strong></p>
+                        ${propiedad.agente.cargo ? `<p>${propiedad.agente.cargo}</p>` : ''}
+                        ${propiedad.agente.telefono ? `<p>📞 ${propiedad.agente.telefono}</p>` : ''}
+                    </div>
+                    ` : ''}
+                    
+                    ${propiedad.descripcion ? `
+                    <div class="property-description">
+                        <h3>📄 Descripción</h3>
+                        <p>${propiedad.descripcion.substring(0, 500)}${propiedad.descripcion.length > 500 ? '...' : ''}</p>
+                    </div>
+                    ` : ''}
+                    
+                    <h3>🖼️ Imágenes (${propiedad.imagenes_urls?.length || 0})</h3>
+                    <div class="property-images">
+                        ${imagenesHTML}
+                    </div>
+                    
+                    <div style="margin-top: 20px; padding: 15px; background: #f0f0f0; border-radius: 10px;">
+                        <small style="color: #666;">
+                            🔗 <a href="${propiedad.url}" target="_blank" style="color: #667eea;">${propiedad.url}</a><br>
+                            📅 Scrapeado: ${new Date(propiedad.fecha_scraping).toLocaleString('es-MX')}
+                        </small>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Listar propiedades
+        async function listarPropiedades() {
+            const result = document.getElementById('result');
+            const loading = document.getElementById('loading');
+            
+            try {
+                loading.classList.add('active');
+                result.classList.remove('active');
+                
+                const response = await fetch(`${API_URL}/properties`);
+                const data = await response.json();
+                
+                loading.classList.remove('active');
+                result.classList.add('active');
+                
+                if (data.success) {
+                    const propiedadesHTML = data.properties.map(prop => `
+                        <div class="property-card" style="cursor: pointer;" onclick="cargarPropiedad('${prop.id}')">
+                            <h3>${prop.titulo || 'Sin título'}</h3>
+                            <p>📍 ${prop.ubicacion || 'Sin ubicación'}</p>
+                            <p style="color: #667eea; font-weight: bold;">💰 ${prop.precio || 'Sin precio'}</p>
+                            <p><small>🖼️ ${prop.num_imagenes} imágenes</small></p>
+                            <p><small>📅 ${new Date(prop.fecha_scraping).toLocaleString('es-MX')}</small></p>
+                        </div>
+                    `).join('');
+                    
+                    result.innerHTML = `
+                        <div class="success">
+                            ✅ ${data.count} propiedades encontradas
+                        </div>
+                        ${propiedadesHTML || '<p>No hay propiedades scrapeadas aún</p>'}
+                    `;
+                } else {
+                    mostrarError('Error al listar propiedades');
+                }
+                
+            } catch (error) {
+                loading.classList.remove('active');
+                mostrarError('Error de conexión: ' + error.message);
+            }
+        }
+        
+        // Cargar una propiedad específica
+        async function cargarPropiedad(id) {
+            const loading = document.getElementById('loading');
+            
+            try {
+                loading.classList.add('active');
+                
+                const response = await fetch(`${API_URL}/property/${id}`);
+                const data = await response.json();
+                
+                loading.classList.remove('active');
+                
+                if (data.success) {
+                    mostrarPropiedad(data.data);
+                } else {
+                    mostrarError('Error al cargar propiedad');
+                }
+                
+            } catch (error) {
+                loading.classList.remove('active');
+                mostrarError('Error de conexión: ' + error.message);
+            }
+        }
+        
+        // Ver estadísticas
+        async function verEstadisticas() {
+            const result = document.getElementById('result');
+            const loading = document.getElementById('loading');
+            
+            try {
+                loading.classList.add('active');
+                result.classList.remove('active');
+                
+                const response = await fetch(`${API_URL}/stats`);
+                const data = await response.json();
+                
+                loading.classList.remove('active');
+                result.classList.add('active');
+                
+                if (data.success) {
+                    result.innerHTML = `
+                        <div class="property-card">
+                            <h2>📊 Estadísticas</h2>
+                            <div class="property-details">
+                                <div class="detail-item">
+                                    <div class="detail-label">Total Propiedades</div>
+                                    <div class="detail-value">${data.stats.total_properties}</div>
+                                </div>
+                                <div class="detail-item">
+                                    <div class="detail-label">Total Imágenes</div>
+                                    <div class="detail-value">${data.stats.total_images}</div>
+                                </div>
+                                <div class="detail-item">
+                                    <div class="detail-label">Almacenamiento</div>
+                                    <div class="detail-value">${data.stats.total_storage_mb} MB</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    mostrarError('Error al obtener estadísticas');
+                }
+                
+            } catch (error) {
+                loading.classList.remove('active');
+                mostrarError('Error de conexión: ' + error.message);
+            }
+        }
+        
+        // Mostrar error
+        function mostrarError(mensaje) {
+            const result = document.getElementById('result');
+            result.classList.add('active');
+            result.innerHTML = `
+                <div class="error">
+                    ❌ ${mensaje}
+                </div>
+            `;
+        }
+        
+        // Enter en input
+        document.getElementById('urlInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                scrapearPropiedad();
+            }
+        });
+    </script>
+</body>
+</html>
+
+
+

@@ -1,0 +1,54 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv/
+
+# ---------- Node / Frontend ----------
+node_modules/
+dist/
+dist-ssr/
+build/
+.vite/
+*.local
+
+# ---------- Env / Secrets ----------
+.env
+.env.local
+.env.*.local
+
+# ---------- Data scrapeada (no va al repo) ----------
+Backend-Scraper-TIBESA/data/
+Backend-Scraper-TIBESA/brochure/static/generated/
+
+# ---------- Playwright ----------
+.playwright/
+playwright-report/
+test-results/
+
+# ---------- IDE ----------
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+
+# ---------- OS ----------
+.DS_Store
+Thumbs.db
+
+# ---------- Logs ----------
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------- Vercel (en caso Vercel genere algo local) ----------
+.vercel

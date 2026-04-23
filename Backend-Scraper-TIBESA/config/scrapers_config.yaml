@@ -1,0 +1,59 @@
+# Configuración de Scrapers
+# Define los scrapers disponibles y sus configuraciones específicas
+
+scrapers:
+  paraiso_dorado:
+    name: "Paraíso Dorado"
+    url_pattern: "paraisodorado.com.mx"
+    class: "ParaisoDoradoScraper"
+    enabled: true
+    description: "Scraper para Paraíso Dorado - Bienes Raíces en Mazatlán"
+    contact:
+      phone: "(669) 990-3280"
+      location: "Mazatlán, Sinaloa, México"
+  
+  investmazatlan:
+    name: "Invest Mazatlán"
+    url_pattern: "investmazatlan.com"
+    class: "InvestMazatlanScraper"
+    enabled: false  # Por implementar
+    description: "Scraper para Invest Mazatlán"
+  
+  lamudi:
+    name: "Lamudi"
+    url_pattern: "lamudi.com.mx"
+    class: "LamudiScraper"
+    enabled: true
+    description: "Scraper para Lamudi - Portal de propiedades en Mazatlán"
+    listado_url: "https://www.lamudi.com.mx/sinaloa/mazatlan/for-sale/"
+
+  mitula:
+    name: "Mitula"
+    url_pattern: "casas.mitula.mx"
+    class: "MitulaScraper"
+    enabled: true
+    description: "Scraper para Mitula - Agregador inmobiliario en Mazatlán"
+    listado_url: "https://casas.mitula.mx/casas/casas-mazatlan"
+
+  inmuebles24:
+    name: "Inmuebles24"
+    url_pattern: "inmuebles24.com"
+    class: "Inmuebles24Scraper"
+    enabled: false  # Bloqueado por Cloudflare
+    description: "Scraper para Inmuebles24 - Portal de propiedades"
+
+# Configuración general
+settings:
+  headless: true  # Ejecutar navegador sin interfaz gráfica
+  timeout: 60000  # Timeout en milisegundos
+  retry_attempts: 3  # Intentos de reintento en caso de fallo
+  download_images: true  # Descargar imágenes automáticamente
+  
+  # Límites
+  max_images_per_property: 50
+  max_concurrent_downloads: 10
+  
+  # Directorios
+  output_dir: "data"
+  images_dir: "data/imagenes"
+  json_dir: "data/json"

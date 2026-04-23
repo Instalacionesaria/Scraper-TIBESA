@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Brochure Inmobiliario — TIBESA Bienes Raíces</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="file://{{ static_dir }}/styles.css">
+</head>
+<body>
+
+{% macro header(theme='dark') %}
+<div class="header">
+  <div class="header-logo">
+    <img src="file://{{ static_dir }}/tibesa-logo.png" alt="TIBESA">
+    <div class="header-brand">
+      TIBESA
+      <span class="sub">Bienes Raíces</span>
+    </div>
+  </div>
+  <div style="font-size: 10px; letter-spacing: 2px; opacity: 0.7;">
+    BROCHURE INMOBILIARIO · MAZATLÁN {{ fecha_actual }}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro footer(num, theme='dark') %}
+<div class="footer">
+  <span>TIBESA · BIENESRAICESTIBESA.MX</span>
+  <span class="line" style="background: {% if theme == 'dark' %}var(--gold){% else %}var(--navy-deep){% endif %}; opacity: 0.3;"></span>
+  <span>{{ '%02d'|format(num) }} / 15</span>
+</div>
+{% endmacro %}
+
+{# ============================================================
+   SLIDE 1 — PORTADA EMOCIONAL
+   ============================================================ #}
+<section class="slide slide-portada slide-dark" style="--hero-bg: url('file://{{ hero_image }}');">
+  {{ header('dark') }}
+  <div class="portada-content">
+    <div class="eyebrow" style="color: var(--gold);">OPORTUNIDAD DE INVERSIÓN · MAZATLÁN</div>
+    <h1 class="portada-title">{{ copy.portada.titulo }}</h1>
+    <div class="portada-divider"></div>
+    <p class="portada-subtitle">{{ copy.portada.subtitulo }}</p>
+  </div>
+  {{ footer(1, 'dark') }}
+</section>
+
+{# ============================================================
+   SLIDE 2 — STORYTELLING
+   ============================================================ #}
+<section class="slide slide-story slide-light">
+  {{ header('light') }}
+  <div class="story-image" style="background-image: url('file://{{ story_image }}');"></div>
+  <div class="story-text">
+    <div class="eyebrow">LA TRANSFORMACIÓN</div>
+    <h2 class="title-md navy-text" style="margin-bottom: 28px;">Mazatlán está viviendo<br>una transformación.</h2>
+    <p class="story-paragraph">{{ copy.storytelling }}</p>
+    <div class="story-highlight">Aquí es donde los inversionistas están entrando.</div>
+  </div>
+  {{ footer(2, 'light') }}
+</section>
+
+{# ============================================================
+   SLIDE 3 — RAZONES CLAVE
+   ============================================================ #}
+<section class="slide slide-razones slide-dark">
+  {{ header('dark') }}
+  <div class="eyebrow">¿POR QUÉ MAZATLÁN?</div>
+  <h2 class="title-md" style="color: white; margin-bottom: 8px;">Razones clave para invertir ahora.</h2>
+  <div class="razones-grid">
+    {% for razon in copy.razones.lista %}
+    <div class="razon-card">
+      <div class="num">{{ '%02d'|format(loop.index) }}</div>
+      <div class="txt">{{ razon }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="razones-frase">"{{ copy.razones.frase_clave }}"</div>
+  {{ footer(3, 'dark') }}
+</section>
+
+{# ============================================================
+   SLIDE 4 — MAPA DE OPORTUNIDAD
+   ============================================================ #}
+<section class="slide slide-mapa slide-light">
+  {{ header('light') }}
+  <div>
+    <div class="eyebrow">MAPA DE OPORTUNIDAD</div>
+    <h2 class="title-md navy-text" style="margin-bottom: 28px;">Zonas estratégicas<br>de Mazatlán</h2>
+    <div class="mapa-image">
+      <img src="file://{{ mapa_image }}" alt="Mapa de oportunidad Mazatlán">
+    </div>
+  </div>
+  <div>
+    <div class="mapa-legend">
+      {% for zona, stats in por_zona.items() if zona != 'Sin clasificar' and stats.count > 0 %}
+      <div class="mapa-zona">
+        <div class="dot" style="background: {{ stats.color }};"></div>
+        <div>
+          <div class="name">{{ zona }}</div>
+          <div class="desc">
+            {% if zona == 'Turística' %}Alta demanda · Cerca del mar
+            {% elif zona == 'Norte' %}Expansión urbana · Crecimiento
+            {% elif zona == 'Centro' %}Uso mixto · Potencial comercial
+            {% elif zona == 'Periferia' %}Entrada de mercado
+            {% else %}Zona estratégica
+            {% endif %}
+          </div>
+        </div>
+        <div class="count">{{ stats.count }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {{ footer(4, 'light') }}
+</section>
+
+{# ============================================================
+   SLIDES 5-7 — ZONAS (Turística, Norte, Centro)
+   ============================================================ #}
+{% for slide_zona in slides_zonas %}
+<section class="slide slide-zona slide-light">
+  {{ header('light') }}
+  <div class="zona-left">
+    <div class="zona-tag" style="background: {{ slide_zona.color }};">
+      {{ slide_zona.categoria }}
+    </div>
+    <h2 class="zona-title">{{ slide_zona.nombre }}</h2>
+    <ul class="zona-bullets">
+      {% for b in slide_zona.bullets %}<li>{{ b }}</li>{% endfor %}
+    </ul>
+    <div class="zona-mensaje">{{ slide_zona.mensaje }}</div>
+  </div>
+  <div class="zona-right">
+    <div class="precio-card">
+      <div class="label">Precio/m² terreno</div>
+      <div class="value">{{ slide_zona.rango_terreno }}</div>
+      <div class="unit">promedio por zona</div>
+    </div>
+    {% if slide_zona.rango_construccion %}
+    <div class="precio-card secondary">
+      <div class="label">Precio/m² construcción</div>
+      <div class="value">{{ slide_zona.rango_construccion }}</div>
+      <div class="unit">promedio por zona</div>
+    </div>
+    {% endif %}
+    <div class="zona-count">Basado en {{ slide_zona.count }} propiedades analizadas</div>
+  </div>
+  {{ footer(slide_zona.slide_num, 'light') }}
+</section>
+{% endfor %}
+
+{# ============================================================
+   SLIDE 8 — COMPARABLES (barras)
+   ============================================================ #}
+<section class="slide slide-comparables slide-dark">
+  {{ header('dark') }}
+  <div class="eyebrow">COMPARABLES · PRUEBA REAL</div>
+  <h2 class="title-md" style="color: white; margin-bottom: 8px;">Precio por m² terreno · Comparativa de zonas</h2>
+  <div class="comparables-chart">
+    {% for comp in comparables %}
+    <div class="comp-bar">
+      <div class="zone-name">{{ comp.zona }}</div>
+      <div class="bar-track">
+        <div class="bar-fill" style="width: {{ comp.porcentaje }}%;">{{ comp.count }} props</div>
+      </div>
+      <div class="price-value">${{ '{:,.0f}'.format(comp.valor) }}/m²</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="comparables-footer">"El mercado ya valida estos valores."</div>
+  {{ footer(8, 'dark') }}
+</section>
+
+{# ============================================================
+   SLIDE 9 — TABLA AVALÚO
+   ============================================================ #}
+<section class="slide slide-tabla slide-light">
+  {{ header('light') }}
+  <div class="eyebrow">COMPARABLES TIPO AVALÚO</div>
+  <h2 class="title-md navy-text">Valores de mercado por zona</h2>
+  <table class="avaluo-table">
+    <thead>
+      <tr>
+        <th>Zona</th>
+        <th>Ubicaciones típicas</th>
+        <th>Precio medio/m² terreno</th>
+        <th>Precio medio/m² construcción</th>
+        <th style="text-align: right;">Muestra</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in tabla_avaluo %}
+      <tr>
+        <td>
+          <span class="zone-pill">
+            <span class="dot" style="background: {{ row.color }};"></span>
+            {{ row.zona }}
+          </span>
+        </td>
+        <td style="color: var(--ink-soft);">{{ row.ubicaciones }}</td>
+        <td class="price-cell">{{ row.precio_terreno }}</td>
+        <td class="price-cell">{{ row.precio_construccion }}</td>
+        <td style="text-align: right; font-weight: 600;">{{ row.count }} props</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {{ footer(9, 'light') }}
+</section>
+
+{# ============================================================
+   SLIDE 10 — COSTO DE CONSTRUIR
+   ============================================================ #}
+<section class="slide slide-costo slide-dark">
+  {{ header('dark') }}
+  <div class="eyebrow">COSTO DE CONSTRUIR</div>
+  <h2 class="title-md" style="color: white;">Valores actuales del mercado</h2>
+  <div class="costo-grid">
+    <div class="costo-card">
+      <div class="tier">Económica</div>
+      <div class="range">$8,000 – $12,000</div>
+      <div class="unit">MXN por m² construido</div>
+    </div>
+    <div class="costo-card">
+      <div class="tier">Media</div>
+      <div class="range">$12,000 – $18,000</div>
+      <div class="unit">MXN por m² construido</div>
+    </div>
+    <div class="costo-card">
+      <div class="tier">Residencial</div>
+      <div class="range">$18,000 – $30,000</div>
+      <div class="unit">MXN por m² construido</div>
+    </div>
+  </div>
+  <div class="costo-mensaje">"El margen está en comprar bien el terreno."</div>
+  {{ footer(10, 'dark') }}
+</section>
+
+{# ============================================================
+   SLIDE 11 — ESCENARIOS DE INVERSIÓN
+   ============================================================ #}
+<section class="slide slide-escenario slide-light">
+  {{ header('light') }}
+  <div class="eyebrow">ESCENARIO DE INVERSIÓN</div>
+  <h2 class="title-md navy-text">Ejemplo: Comprar en zona Norte + construir</h2>
+  <div class="escenario-flow">
+    <div class="esc-step">
+      <div class="label">Terreno (Norte)</div>
+      <div class="value">${{ '{:,.0f}'.format(escenario.precio_terreno) }}</div>
+      <div class="note">MXN/m²</div>
+    </div>
+    <div class="esc-arrow">→</div>
+    <div class="esc-step">
+      <div class="label">Construcción media</div>
+      <div class="value">$15,000</div>
+      <div class="note">MXN/m²</div>
+    </div>
+    <div class="esc-arrow">→</div>
+    <div class="esc-step final">
+      <div class="label">Valor final</div>
+      <div class="value">~${{ '{:,.0f}'.format(escenario.valor_final) }}</div>
+      <div class="note">MXN/m² construido</div>
+    </div>
+  </div>
+  <div class="escenario-margin">
+    Margen potencial: <span class="highlight">${{ '{:,.0f}'.format(escenario.margen) }} MXN/m²</span>
+  </div>
+  {{ footer(11, 'light') }}
+</section>
+
+{# ============================================================
+   SLIDE 12 — TENDENCIAS
+   ============================================================ #}
+<section class="slide slide-tendencias slide-light">
+  {{ header('light') }}
+  <div class="eyebrow">TENDENCIAS DEL MERCADO</div>
+  <h2 class="title-md navy-text">Hacia dónde se mueve Mazatlán</h2>
+  <div class="tendencias-list">
+    {% for t in copy.tendencias %}
+    <div class="tendencia-item">
+      <div class="icon">↗</div>
+      <div class="txt">{{ t }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {{ footer(12, 'light') }}
+</section>
+
+{# ============================================================
+   SLIDE 13 — RIESGO VS OPORTUNIDAD
+   ============================================================ #}
+<section class="slide slide-riesgo slide-dark">
+  {{ header('dark') }}
+  <div class="eyebrow">RIESGO VS OPORTUNIDAD</div>
+  <h2 class="title-md" style="color: white;">Dos caras del mercado actual</h2>
+  <div class="riesgo-grid">
+    <div class="riesgo-col risks">
+      <div class="col-title">Riesgos</div>
+      <ul>
+        {% for r in copy.riesgos %}<li>{{ r }}</li>{% endfor %}
+      </ul>
+    </div>
+    <div class="riesgo-col opps">
+      <div class="col-title">Oportunidades</div>
+      <ul>
+        {% for o in copy.oportunidades %}<li>{{ o }}</li>{% endfor %}
+      </ul>
+    </div>
+  </div>
+  {{ footer(13, 'dark') }}
+</section>
+
+{# ============================================================
+   SLIDE 14 — MENSAJE FINAL
+   ============================================================ #}
+<section class="slide slide-final slide-dark" style="--final-bg: url('file://{{ final_image }}');">
+  {{ header('dark') }}
+  <div class="final-content">
+    <p class="final-message">
+      Mazatlán no es el futuro…<br>
+      es <strong>el presente</strong> de la<br>
+      inversión inmobiliaria.
+    </p>
+    <div class="final-divider"></div>
+  </div>
+  {{ footer(14, 'dark') }}
+</section>
+
+{# ============================================================
+   SLIDE 15 — CALL TO ACTION
+   ============================================================ #}
+<section class="slide slide-cta slide-light">
+  {{ header('light') }}
+  <div class="cta-left">
+    <h2 class="cta-headline">
+      Invierte <span class="gold">hoy</span>.<br>
+      Asegura plusvalía mañana.
+    </h2>
+    <p class="cta-tagline">Venta y renta de propiedades en Mazatlán. Encuentra la mejor oferta en terrenos, casas, locales y más.</p>
+    <div class="cta-contact">
+      <div class="contact-item">
+        <div class="ico">☎</div>
+        <div>
+          <div class="label">Teléfono</div>
+          <div class="value">{{ contacto.telefono }}</div>
+        </div>
+      </div>
+      <div class="contact-item">
+        <div class="ico">W</div>
+        <div>
+          <div class="label">WhatsApp</div>
+          <div class="value">{{ contacto.whatsapp }}</div>
+        </div>
+      </div>
+      <div class="contact-item">
+        <div class="ico">@</div>
+        <div>
+          <div class="label">Web</div>
+          <div class="value">{{ contacto.web }}</div>
+        </div>
+      </div>
+      <div class="contact-item">
+        <div class="ico">f</div>
+        <div>
+          <div class="label">Redes</div>
+          <div class="value">{{ contacto.redes }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="cta-right">
+    <div class="cta-logo-big">
+      <img src="file://{{ static_dir }}/tibesa-logo.png" alt="TIBESA Bienes Raíces">
+    </div>
+    <div class="cta-tag">TIBESA · BIENES RAÍCES MAZATLÁN</div>
+  </div>
+  {{ footer(15, 'light') }}
+</section>
+
+</body>
+</html>

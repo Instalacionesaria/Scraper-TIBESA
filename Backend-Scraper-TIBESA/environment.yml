@@ -1,0 +1,14 @@
+name: ARIA-TIBESA-Scraper-2
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - playwright==1.41.0
+      - aiohttp==3.9.1
+      - fastapi==0.109.0
+      - uvicorn[standard]==0.27.0
+      - python-multipart==0.0.6
+

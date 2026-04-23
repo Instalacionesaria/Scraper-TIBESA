@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Search, Play, Loader2, Send, Database } from 'lucide-react'
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+import { Link } from 'react-router-dom'
+import { Play, Loader2, Send, AlertTriangle } from 'lucide-react'
+import { getCredentials } from '../lib/auth'
+import { startGooglePlaces, pollJobUntilDone, sendToCrm } from '../lib/leadsApi'
 
 const MAX_ETIQUETA_LEN = 30
 
@@ -12,60 +13,83 @@ export default function BusquedaLeadsPage() {
   const [etiqueta, setEtiqueta] = useState('')
 
   const [status, setStatus] = useState('idle') // idle | scraping | done | error
-  const [enviandoCRM, setEnviandoCRM] = useState(false)
-  const [enviandoLeads, setEnviandoLeads] = useState(false)
+  const [jobId, setJobId] = useState(null)
+  const [resultsCount, setResultsCount] = useState(0)
+  const [errorMsg, setErrorMsg] = useState('')
 
-  const canStart = tipoNegocio.trim() && localizacion.trim() && status !== 'scraping'
-  const canSendLeads = status === 'done' && etiqueta.trim() && !enviandoLeads
+  const [enviandoCRM, setEnviandoCRM] = useState(false)
+  const [crmResult, setCrmResult] = useState(null)
+
+  const credentials = getCredentials()
+  const hasAuth = !!credentials
+
+  const canStart = hasAuth && tipoNegocio.trim() && localizacion.trim() && status !== 'scraping'
+  const canSendCRM = status === 'done' && etiqueta.trim() && !enviandoCRM && jobId
 
   const handleStart = async () => {
     if (!canStart) return
     setStatus('scraping')
+    setErrorMsg('')
+    setResultsCount(0)
+    setCrmResult(null)
+
     try {
-      // TODO: conectar con el endpoint del backend cuando esté disponible
-      // const res = await fetch(`${API_BASE}/api/leads/scrape`, { ... })
-      await new Promise(r => setTimeout(r, 1200))
-      setStatus('done')
+      const { jobId: newJobId } = await startGooglePlaces({
+        businessType: tipoNegocio.trim(),
+        location: localizacion.trim(),
+        getEmails: enriquecer,
+        credentials,
+      })
+      setJobId(newJobId)
+
+      const job = await pollJobUntilDone(newJobId)
+      if (job.status === 'COMPLETED') {
+        setResultsCount(job.results_count || 0)
+        setStatus('done')
+      } else {
+        setErrorMsg(`El trabajo terminó con estado: ${job.status}`)
+        setStatus('error')
+      }
     } catch (e) {
       console.error(e)
+      setErrorMsg(e.message || 'Error desconocido')
       setStatus('error')
     }
   }
 
   const handleEnviarCRM = async () => {
-    if (!etiqueta.trim()) return
+    if (!canSendCRM) return
     setEnviandoCRM(true)
+    setCrmResult(null)
     try {
-      // TODO: POST a endpoint de CRM
-      await new Promise(r => setTimeout(r, 800))
-      alert('Etiqueta enviada a CRM de TIBESA')
+      const res = await sendToCrm({ jobId, etiqueta: etiqueta.trim(), credentials })
+      setCrmResult(res)
+    } catch (e) {
+      setCrmResult({ status: 'error', message: e.message })
     } finally {
       setEnviandoCRM(false)
     }
   }
 
-  const handleEnviarLeads = async () => {
-    if (!canSendLeads) return
-    setEnviandoLeads(true)
-    try {
-      // TODO: POST a endpoint de sistema de leads
-      await new Promise(r => setTimeout(r, 800))
-      alert('Leads enviados al Sistema de Leads')
-    } finally {
-      setEnviandoLeads(false)
-    }
-  }
-
   return (
     <div>
-      {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-1">Nueva Búsqueda de Leads</h1>
         <p className="text-sm text-gray-500">Encuentra y enriquece datos de contacto empresarial</p>
       </div>
 
+      {!hasAuth && (
+        <div className="mb-6 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+          <AlertTriangle className="w-5 h-5 shrink-0 text-amber-500 mt-0.5" />
+          <div>
+            Aún no has configurado tus credenciales TIBESA.{' '}
+            <Link to="/configuracion" className="underline font-medium">Ir a Configuración</Link> para guardarlas.
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Panel izquierdo: Parámetros */}
+        {/* Parámetros */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-gray-800 mb-5">Parámetros de Búsqueda</h2>
 
@@ -117,7 +141,7 @@ export default function BusquedaLeadsPage() {
               className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-sky-500 hover:bg-sky-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               {status === 'scraping' ? (
-                <><Loader2 className="w-4 h-4 animate-spin" /> Scrapeando...</>
+                <><Loader2 className="w-4 h-4 animate-spin" /> Scrapeando... (puede tardar varios minutos)</>
               ) : (
                 <><Play className="w-4 h-4" /> Iniciar Scraping</>
               )}
@@ -125,18 +149,18 @@ export default function BusquedaLeadsPage() {
 
             {status === 'done' && (
               <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                Scrapeo completado. Ya puedes enviar los leads.
+                Scrapeo completado. <strong>{resultsCount}</strong> leads encontrados. Job ID: <code className="text-xs">{jobId}</code>
               </div>
             )}
             {status === 'error' && (
               <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                Ocurrió un error durante el scrapeo.
+                {errorMsg || 'Ocurrió un error durante el scrapeo.'}
               </div>
             )}
           </div>
         </div>
 
-        {/* Panel derecho: Etiqueta CRM */}
+        {/* Etiqueta CRM */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-gray-800 mb-1">Etiqueta para CRM de TIBESA</h2>
           <p className="text-sm text-gray-500 mb-5">Identifica y organiza tus leads en el CRM</p>
@@ -158,7 +182,7 @@ export default function BusquedaLeadsPage() {
 
             <button
               onClick={handleEnviarCRM}
-              disabled={!etiqueta.trim() || enviandoCRM}
+              disabled={!canSendCRM}
               className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               {enviandoCRM ? (
@@ -168,17 +192,18 @@ export default function BusquedaLeadsPage() {
               )}
             </button>
 
-            <button
-              onClick={handleEnviarLeads}
-              disabled={!canSendLeads}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-indigo-400 hover:bg-indigo-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors cursor-pointer"
-            >
-              {enviandoLeads ? (
-                <><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</>
-              ) : (
-                <><Database className="w-4 h-4" /> Enviar a Sistema de Leads</>
-              )}
-            </button>
+            {crmResult && (
+              <div className={`text-sm rounded-lg px-3 py-2 border ${
+                crmResult.status === 'success'
+                  ? 'text-green-700 bg-green-50 border-green-200'
+                  : 'text-red-700 bg-red-50 border-red-200'
+              }`}>
+                {crmResult.message}
+                {typeof crmResult.leads_sent === 'number' && (
+                  <span className="block text-xs mt-1">Enviados: {crmResult.leads_sent}</span>
+                )}
+              </div>
+            )}
 
             <div className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 flex items-start gap-2">
               <span className="text-gray-400 mt-0.5">ⓘ</span>

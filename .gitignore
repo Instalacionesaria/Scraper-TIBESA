@@ -52,3 +52,6 @@ pnpm-debug.log*
 
 # ---------- Vercel (en caso Vercel genere algo local) ----------
 .vercel
+
+# ---------- Carpeta de referencia (código ya integrado a Backend-Scraper-TIBESA/leads/) ----------
+Proyecto-Software-Scraper-TIBESA-System-1/

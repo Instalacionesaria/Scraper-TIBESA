@@ -30,6 +30,9 @@ from playwright.async_api import async_playwright
 # Brochure generator
 from brochure.generator import generar_brochure
 
+# Módulo de Leads (Google Places, Facebook Ads/Pages, CRM TIBESA)
+from leads.routes import router as leads_router
+
 load_dotenv()
 
 # Inicializar FastAPI
@@ -73,6 +76,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Registrar rutas del módulo de leads (Google Places, Facebook Ads/Pages, CRM TIBESA)
+app.include_router(leads_router)
 
 # Directorios
 DATA_DIR = Path("data")

@@ -4,6 +4,7 @@ import ScraperPage from './pages/ScraperPage'
 import ResultadosPage from './pages/ResultadosPage'
 import ConfiguracionPage from './pages/ConfiguracionPage'
 import BusquedaLeadsPage from './pages/BusquedaLeadsPage'
+import ScrappersFacebookPage from './pages/ScrappersFacebookPage'
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
         <Routes>
           <Route path="/" element={<ScraperPage />} />
           <Route path="/leads" element={<BusquedaLeadsPage />} />
+          <Route path="/facebook" element={<ScrappersFacebookPage />} />
           <Route path="/resultados" element={<ResultadosPage />} />
           <Route path="/configuracion" element={<ConfiguracionPage />} />
         </Routes>

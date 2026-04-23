@@ -1,9 +1,10 @@
 import { NavLink } from 'react-router-dom'
-import { Building2, BarChart3, Settings, LogOut, Search } from 'lucide-react'
+import { Building2, BarChart3, Settings, LogOut, Search, Facebook } from 'lucide-react'
 
 const navItems = [
   { to: '/leads', label: 'Búsqueda de Leads', icon: Search },
-  { to: '/', label: 'Scraper Inmobiliario', icon: Building2 },
+  { to: '/facebook', label: 'Scrappers de Facebook', icon: Facebook },
+  { to: '/', label: 'Scraper de Propiedades Específicas', icon: Building2 },
   { to: '/resultados', label: 'Resultados', icon: BarChart3 },
   { to: '/configuracion', label: 'Configuración', icon: Settings },
 ]

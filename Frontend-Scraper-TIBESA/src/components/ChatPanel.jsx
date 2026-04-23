@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { MessageCircle, Send, Loader2, Sparkles, User, Bot, ChevronDown, ChevronUp } from 'lucide-react'
 
-const API_BASE = 'http://localhost:8000'
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 const SUGGESTIONS = [
   '¿Cuántas casas hay y cuál es el precio promedio?',

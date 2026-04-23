@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { BarChart3, FileText, Download, Loader2, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react'
 
-const API_BASE = 'http://localhost:8000'
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 export default function ResultadosPage() {
   const [propertyCount, setPropertyCount] = useState(0)

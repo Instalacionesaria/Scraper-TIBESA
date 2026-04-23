@@ -1,7 +1,8 @@
 import { NavLink } from 'react-router-dom'
-import { Building2, BarChart3, Settings, LogOut } from 'lucide-react'
+import { Building2, BarChart3, Settings, LogOut, Search } from 'lucide-react'
 
 const navItems = [
+  { to: '/leads', label: 'Búsqueda de Leads', icon: Search },
   { to: '/', label: 'Scraper Inmobiliario', icon: Building2 },
   { to: '/resultados', label: 'Resultados', icon: BarChart3 },
   { to: '/configuracion', label: 'Configuración', icon: Settings },

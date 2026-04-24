@@ -36,18 +36,15 @@ function humanizeHeader(key) {
     .replace(/^\w/, (c) => c.toUpperCase())
 }
 
-function pickColumns(rows, max = 12) {
+function pickColumns(rows) {
   const counts = new Map()
   for (const row of rows) {
-    for (const [key, value] of Object.entries(row || {})) {
-      if (value === null || value === undefined) continue
-      if (typeof value === 'object' && !Array.isArray(value)) continue
+    for (const key of Object.keys(row || {})) {
       counts.set(key, (counts.get(key) || 0) + 1)
     }
   }
   return Array.from(counts.entries())
     .sort((a, b) => b[1] - a[1])
-    .slice(0, max)
     .map(([k]) => k)
 }
 

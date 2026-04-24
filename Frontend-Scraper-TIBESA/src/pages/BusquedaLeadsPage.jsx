@@ -72,25 +72,24 @@ export default function BusquedaLeadsPage() {
   }
 
   return (
-    <div>
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-1">Nueva Búsqueda de Leads</h1>
-        <p className="text-sm text-gray-500">Encuentra y enriquece datos de contacto empresarial</p>
-      </div>
-
-      {!hasAuth && (
-        <div className="mb-6 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
-          <AlertTriangle className="w-5 h-5 shrink-0 text-amber-500 mt-0.5" />
-          <div>
-            Aún no has configurado tus credenciales TIBESA.{' '}
-            <Link to="/configuracion" className="underline font-medium">Ir a Configuración</Link> para guardarlas.
-          </div>
+    <div className="flex gap-6 -mr-8 min-h-[calc(100vh-4rem)]">
+      <div className="flex-1">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-1">Nueva Búsqueda de Leads</h1>
+          <p className="text-sm text-gray-500">Encuentra y enriquece datos de contacto empresarial</p>
         </div>
-      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Parámetros */}
-        <div className="lg:col-span-2 bg-white border border-gray-200 rounded-xl p-6">
+        {!hasAuth && (
+          <div className="mb-6 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+            <AlertTriangle className="w-5 h-5 shrink-0 text-amber-500 mt-0.5" />
+            <div>
+              Aún no has configurado tus credenciales TIBESA.{' '}
+              <Link to="/configuracion" className="underline font-medium">Ir a Configuración</Link> para guardarlas.
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white border border-gray-200 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-gray-800 mb-5">Parámetros de Búsqueda</h2>
 
           <div className="space-y-4">
@@ -159,59 +158,59 @@ export default function BusquedaLeadsPage() {
             )}
           </div>
         </div>
+      </div>
 
-        {/* Etiqueta CRM */}
-        <div className="bg-[#2c3e50] border border-white/10 rounded-xl p-6 text-white">
-          <h2 className="text-lg font-semibold mb-1">Etiqueta para CRM de TIBESA</h2>
-          <p className="text-sm text-white/60 mb-5">Identifica y organiza tus leads en el CRM</p>
+      {/* Panel lateral oscuro: Etiqueta CRM */}
+      <aside className="w-72 bg-[#2c3e50] text-white p-6 shrink-0">
+        <h2 className="text-lg font-semibold mb-1">Etiqueta para CRM de TIBESA</h2>
+        <p className="text-sm text-white/70 mb-5">Identifica y organiza tus leads en el CRM</p>
 
-          <div className="space-y-4">
-            <div>
-              <input
-                type="text"
-                value={etiqueta}
-                onChange={(e) => setEtiqueta(e.target.value.slice(0, MAX_ETIQUETA_LEN))}
-                placeholder="Ej: Leads Peluquerias Lima - Enero 2025"
-                maxLength={MAX_ETIQUETA_LEN}
-                className="w-full px-3 py-2.5 bg-white/5 border border-white/15 rounded-lg text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-sky-400/60 focus:border-transparent"
-              />
-              <p className="text-xs text-white/50 mt-1.5">
-                Esta etiqueta te ayudará a identificar y organizar tus leads en CRM de TIBESA (máx. {MAX_ETIQUETA_LEN} caracteres)
-              </p>
-            </div>
+        <div className="space-y-4">
+          <div>
+            <input
+              type="text"
+              value={etiqueta}
+              onChange={(e) => setEtiqueta(e.target.value.slice(0, MAX_ETIQUETA_LEN))}
+              placeholder="Ej: Leads Peluquerias Lima - Enero 2025"
+              maxLength={MAX_ETIQUETA_LEN}
+              className="w-full px-3 py-2.5 bg-white/10 border border-white/20 rounded-lg text-sm text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-transparent"
+            />
+            <p className="text-xs text-white/50 mt-1.5">
+              Esta etiqueta te ayudará a identificar y organizar tus leads en CRM de TIBESA (máx. {MAX_ETIQUETA_LEN} caracteres)
+            </p>
+          </div>
 
-            <button
-              onClick={handleEnviarCRM}
-              disabled={!canSendCRM}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-emerald-500 hover:bg-emerald-600 disabled:bg-white/10 disabled:text-white/40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-            >
-              {enviandoCRM ? (
-                <><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</>
-              ) : (
-                <><Send className="w-4 h-4" /> Enviar a CRM de TIBESA</>
-              )}
-            </button>
-
-            {crmResult && (
-              <div className={`text-sm rounded-lg px-3 py-2 border ${
-                crmResult.status === 'success'
-                  ? 'text-emerald-200 bg-emerald-500/10 border-emerald-400/30'
-                  : 'text-red-200 bg-red-500/10 border-red-400/30'
-              }`}>
-                {crmResult.message}
-                {typeof crmResult.leads_sent === 'number' && (
-                  <span className="block text-xs mt-1">Enviados: {crmResult.leads_sent}</span>
-                )}
-              </div>
+          <button
+            onClick={handleEnviarCRM}
+            disabled={!canSendCRM}
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-emerald-500 hover:bg-emerald-600 disabled:bg-white/10 disabled:text-white/40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            {enviandoCRM ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</>
+            ) : (
+              <><Send className="w-4 h-4" /> Enviar a CRM de TIBESA</>
             )}
+          </button>
 
-            <div className="text-xs text-white/60 bg-white/5 border border-white/10 rounded-lg px-3 py-2 flex items-start gap-2">
-              <span className="text-white/40 mt-0.5">ⓘ</span>
-              <span>Esta opción solo se habilita una vez que se termine el scrapeo de los Leads</span>
+          {crmResult && (
+            <div className={`text-xs rounded-lg px-3 py-2 border ${
+              crmResult.status === 'success'
+                ? 'text-green-200 bg-green-500/10 border-green-500/30'
+                : 'text-red-200 bg-red-500/10 border-red-500/30'
+            }`}>
+              {crmResult.message}
+              {typeof crmResult.leads_sent === 'number' && (
+                <span className="block mt-1">Enviados: {crmResult.leads_sent}</span>
+              )}
             </div>
+          )}
+
+          <div className="text-xs text-white/60 bg-white/5 border border-white/10 rounded-lg px-3 py-2 flex items-start gap-2">
+            <span className="text-white/40 mt-0.5">ⓘ</span>
+            <span>Esta opción solo se habilita una vez que se termine el scrapeo de los Leads</span>
           </div>
         </div>
-      </div>
+      </aside>
     </div>
   )
 }

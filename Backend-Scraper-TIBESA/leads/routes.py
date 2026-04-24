@@ -19,7 +19,7 @@ from typing import Any, Dict
 from apify_client import ApifyClient
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
-from . import crm_tibesa, facebook_ads, facebook_pages, google_places, sistema_leads
+from . import crm_tibesa, facebook_ads, facebook_pages, google_places, linkedin_scraper, sistema_leads
 from .models import (
     ApifyWebhookPayload,
     EnviarCRMRequest,
@@ -27,6 +27,7 @@ from .models import (
     FacebookAdsRequest,
     FacebookPagesRequest,
     GooglePlacesRequest,
+    LinkedInRequest,
     LoginRequest,
 )
 from .supabase_client import (
@@ -171,6 +172,46 @@ async def start_facebook_pages(request: FacebookPagesRequest) -> Dict[str, Any]:
         "message": "El scraping de las páginas de Facebook ha comenzado.",
         "jobId": job_id,
         "job_id": job_id,  # compat snake_case
+    }
+
+
+# ============================================================================
+# LINKEDIN — Búsqueda de leads (Apollo via peakydev/leads-scraper-ppe)
+# ============================================================================
+
+@router.post("/linkedin/start")
+async def start_linkedin(request: LinkedInRequest) -> Dict[str, Any]:
+    """Inicia un scraping de LinkedIn leads vía Apify."""
+    if not request.jobTitle.strip() or not request.country.strip():
+        raise HTTPException(status_code=400, detail="jobTitle y country son requeridos.")
+
+    user = get_user_by_email(request.correo_electronico)
+
+    job_id = create_job(
+        user_id=user["id"],
+        business_type=f"LinkedIn: {request.jobTitle}",
+        location=", ".join([x for x in (request.state, request.country) if x]),
+    )
+
+    try:
+        run_id = linkedin_scraper.start_linkedin_scrape(
+            person_title=request.jobTitle.strip(),
+            person_country=request.country.strip(),
+            person_state=(request.state or "").strip() or None,
+            total_results=request.numberOfLeads,
+            webhook_base_url=WEBHOOK_BASE_URL,
+            job_id=job_id,
+        )
+        update_job_run_id(job_id, run_id)
+    except Exception as e:
+        update_job_results(job_id, "FAILED", error_message=str(e))
+        raise HTTPException(status_code=502, detail=f"Error iniciando LinkedIn: {e}")
+
+    print(f"✅ LinkedIn iniciado. Job: {job_id} | Run: {run_id}")
+    return {
+        "status": "success",
+        "message": "El scraping de LinkedIn ha comenzado.",
+        "jobId": job_id,
     }
 
 
@@ -401,6 +442,18 @@ async def webhook_facebook_pages(payload: ApifyWebhookPayload, background_tasks:
     return {"status": "webhook received"}
 
 
+@router.post("/webhooks/linkedin")
+async def webhook_linkedin(payload: ApifyWebhookPayload, background_tasks: BackgroundTasks):
+    """Webhook de Apify: LinkedIn SUCCEEDED."""
+    print(f"🔔 Webhook LinkedIn | Job: {payload.job_id}")
+    background_tasks.add_task(
+        _process_linkedin_results,
+        payload.job_id,
+        payload.resource.defaultDatasetId,
+    )
+    return {"status": "webhook received"}
+
+
 # ============================================================================
 # PROCESADORES EN BACKGROUND
 # ============================================================================
@@ -450,6 +503,31 @@ async def _process_facebook_ads_results(job_id: str, dataset_id: str) -> None:
     except Exception as e:
         print(f"❌ Error procesando FB Ads job {job_id}: {e}")
         update_job_results(job_id, "FAILED", error_message=str(e))
+
+
+async def _process_linkedin_results(job_id: str, dataset_id: str) -> None:
+    try:
+        print(f"🔄 Procesando LinkedIn. Job={job_id} Dataset={dataset_id}")
+        items = ApifyClient(APIFY_TOKEN).dataset(dataset_id).list_items().items
+        print(f"📊 {len(items)} items de Apify")
+
+        if items and isinstance(items[0], dict) and "error" in items[0] and not items[0].get("email"):
+            err = items[0].get("error", "Error desconocido")
+            print(f"❌ Actor error: {err}")
+            update_job_results(job_id, "FAILED", error_message=str(err))
+            return
+
+        leads = linkedin_scraper.build_final_leads(items)
+        output = {"data": leads, "results_count": len(leads)}
+        update_job_results(job_id, "COMPLETED", results=output)
+        print(f"🏁 LinkedIn job {job_id} completado. {len(leads)} leads.")
+    except Exception as e:
+        print(f"❌ Error procesando LinkedIn job {job_id}: {e}")
+        traceback.print_exc()
+        try:
+            update_job_results(job_id, "FAILED", error_message=str(e))
+        except Exception:
+            pass
 
 
 async def _process_facebook_pages_results(job_id: str, dataset_id: str) -> None:

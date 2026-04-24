@@ -61,6 +61,18 @@ class FacebookPagesRequest(BaseModel):
         return [p.model_dump() for p in self.pages]
 
 
+# ---------- LinkedIn (Apollo / peakydev/leads-scraper-ppe) ----------
+
+class LinkedInRequest(BaseModel):
+    jobTitle: str
+    country: str
+    state: Optional[str] = None
+    numberOfLeads: int = 100
+    userId: Optional[str] = None
+    correo_electronico: str
+    timestamp: Optional[str] = None
+
+
 # ---------- Webhooks de Apify ----------
 
 class ApifyWebhookResource(BaseModel):

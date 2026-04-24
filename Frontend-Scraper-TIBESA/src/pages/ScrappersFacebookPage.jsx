@@ -245,6 +245,10 @@ export default function ScrappersFacebookPage() {
           </div>
         </div>
 
+        {statusAds === 'done' && adsPages.length > 0 && statusPages !== 'done' && (
+          <LeadsTable rows={adsPages} title={`Páginas detectadas (${adsPages.length})`} />
+        )}
+
         {statusPages === 'done' && pagesData.length > 0 && (
           <LeadsTable rows={pagesData} title="Páginas de Facebook scrapeadas" />
         )}

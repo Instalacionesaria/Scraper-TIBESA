@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Tuple
 import requests
 
 
-CRM_API_URL = "https://sandboxapi.bienesraicestibesa.mx/contacts/createContact"
+CRM_API_URL = "https://api.bienesraicestibesa.mx/contacts/createContact"
 CRM_API_TOKEN = os.getenv("CRM_TIBESA_API_TOKEN")
 
 
@@ -58,40 +58,41 @@ def send_leads_to_crm(
     for idx, lead in enumerate(leads, 1):
         try:
             name = (lead.get("title") or "").strip()
+            email = (lead.get("email") or "").strip()
             if not name:
                 skipped += 1
                 print(f"  ⏭️  Lead {idx}/{len(leads)} omitido: sin nombre")
                 continue
+            if not email:
+                skipped += 1
+                print(f"  ⏭️  Lead {idx}/{len(leads)} omitido: sin email ({name})")
+                continue
 
-            email = (lead.get("email") or "").strip() or "sin-email@tibesa.com"
-            phone = (lead.get("phone") or lead.get("phoneUnformatted") or "").strip() or "No disponible"
+            phone = (lead.get("phone") or lead.get("phoneUnformatted") or "").strip()
 
             form_data = {
-                # Requeridos
+                # Requeridos por el CRM
                 "name": name,
                 "email": email,
-                "phone": phone,
+                # Source fijo (siempre ariaIA)
                 "source": "ariaIA",
-                # Opcionales
-                "company": lead.get("companyName") or lead.get("title", ""),
-                "address": lead.get("address", ""),
-                "website": lead.get("website", ""),
+                # Opcionales — solo se envían si el lead los trae
+                "phone": phone,
+                "cellPhone": (lead.get("mobileNumber") or "").strip(),
+                "city": (lead.get("city") or lead.get("neighborhood") or "").strip(),
+                "company": (lead.get("companyName") or lead.get("title") or "").strip(),
+                "companyRol": (lead.get("jobTitle") or "").strip(),
+                "address": (lead.get("address") or "").strip(),
+                "interests": (lead.get("categoryName") or "").strip(),
                 "tag": etiqueta,
-                "job_id": job_id,
-                "import_date": datetime.utcnow().isoformat(),
-                "category": lead.get("categoryName", ""),
-                "neighborhood": lead.get("neighborhood", ""),
-                "linkedin": lead.get("linkedinProfile", ""),
-                "job_title": lead.get("jobTitle", ""),
             }
             # Eliminar vacíos salvo requeridos
             form_data = {
                 k: v for k, v in form_data.items()
-                if (v and str(v).strip()) or k in ("name", "email", "phone", "source")
+                if (v and str(v).strip()) or k in ("name", "email", "source")
             }
 
             files_data = {k: (None, str(v)) for k, v in form_data.items()}
-
             r = requests.post(
                 CRM_API_URL,
                 files=files_data,

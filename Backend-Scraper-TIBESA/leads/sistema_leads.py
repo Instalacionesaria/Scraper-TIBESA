@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 import requests
 
 
-SISTEMA_LEADS_URL = "https://n8n.ariaia.com/webhook/scrapper1"
+SISTEMA_LEADS_URL = "https://tibesa-next.vercel.app/api/webhooks/prospectos"
 
 # Campos aceptados por el endpoint de prospectos.
 _ALLOWED_FIELDS = {

@@ -250,7 +250,7 @@ async def _extraer_urls_lamudi(config: dict) -> List[str]:
 @app.get("/")
 async def root():
     return {
-        "message": "API Scraper de Propiedades - TIBESA",
+        "message": "API Scraper de Propiedades - TIBESA v4",
         "version": "3.0.0",
         "sitios_soportados": list(SCRAPERS_MAP.keys()),
     }

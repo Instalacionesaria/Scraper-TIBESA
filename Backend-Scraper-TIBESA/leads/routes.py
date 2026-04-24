@@ -19,10 +19,11 @@ from typing import Any, Dict
 from apify_client import ApifyClient
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
-from . import crm_tibesa, facebook_ads, facebook_pages, google_places
+from . import crm_tibesa, facebook_ads, facebook_pages, google_places, sistema_leads
 from .models import (
     ApifyWebhookPayload,
     EnviarCRMRequest,
+    EnviarSistemaLeadsRequest,
     FacebookAdsRequest,
     FacebookPagesRequest,
     GooglePlacesRequest,
@@ -224,6 +225,49 @@ async def send_to_crm(request: EnviarCRMRequest) -> Dict[str, Any]:
         "leads_sent": result["leads_sent"],
         "etiqueta": request.etiqueta,
         "job_id": request.job_id,
+    }
+
+
+# ============================================================================
+# SISTEMA DE LEADS (webhook n8n)
+# ============================================================================
+
+@router.post("/sistema-leads/send")
+async def send_to_sistema_leads(request: EnviarSistemaLeadsRequest) -> Dict[str, Any]:
+    """Envía los leads de un job completado al Sistema de Leads (n8n)."""
+    user = get_user_by_email(request.correo_electronico)
+    job = get_job(request.job_id)
+
+    if job.get("user_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="No tienes permiso sobre este trabajo.")
+    if job.get("status") != "COMPLETED":
+        raise HTTPException(
+            status_code=400,
+            detail=f"El trabajo no está completado. Estado: {job.get('status')}",
+        )
+
+    results_data = job.get("results_data") or {}
+    leads = results_data.get("data") or []
+    if not leads:
+        raise HTTPException(status_code=400, detail="El trabajo no tiene resultados para enviar.")
+
+    print(f"📊 {len(leads)} leads a enviar al Sistema de Leads")
+    result = sistema_leads.send_leads_to_sistema(leads)
+
+    if result.get("success"):
+        results_data.update({
+            "enviado_a_sistema_leads": True,
+            "sistema_leads_fecha_envio": __import__("datetime").datetime.utcnow().isoformat(),
+        })
+        patch_job_results_data(request.job_id, results_data)
+
+    return {
+        "status": "success" if result["success"] else "error",
+        "message": result["message"],
+        "leads_sent": result["leads_sent"],
+        "leads_failed": result.get("leads_failed", 0),
+        "job_id": request.job_id,
+        "errors": result.get("errors", []),
     }
 
 

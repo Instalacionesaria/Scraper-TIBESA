@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Play, Loader2, Send, AlertTriangle, Download } from 'lucide-react'
+import { Play, Loader2, Send, AlertTriangle, Download, Share2 } from 'lucide-react'
 import { getCredentials } from '../lib/auth'
-import { startGooglePlaces, pollJobUntilDone, sendToCrm } from '../lib/leadsApi'
+import { startGooglePlaces, pollJobUntilDone, sendToCrm, sendToSistemaLeads } from '../lib/leadsApi'
 import { downloadCsv } from '../lib/csv'
 import LeadsTable from '../components/LeadsTable'
 
@@ -22,12 +22,15 @@ export default function BusquedaLeadsPage() {
 
   const [enviandoCRM, setEnviandoCRM] = useState(false)
   const [crmResult, setCrmResult] = useState(null)
+  const [enviandoSL, setEnviandoSL] = useState(false)
+  const [slResult, setSlResult] = useState(null)
 
   const credentials = getCredentials()
   const hasAuth = !!credentials
 
   const canStart = hasAuth && tipoNegocio.trim() && localizacion.trim() && status !== 'scraping'
   const canSendCRM = status === 'done' && etiqueta.trim() && !enviandoCRM && jobId
+  const canSendSL = status === 'done' && !enviandoSL && jobId
   const canDownloadCsv = status === 'done' && leads.length > 0
 
   const handleStart = async () => {
@@ -67,6 +70,20 @@ export default function BusquedaLeadsPage() {
     if (!canDownloadCsv) return
     const slug = (tipoNegocio + '-' + localizacion).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
     downloadCsv(leads, `leads-${slug || 'tibesa'}-${jobId?.slice(0, 8) || Date.now()}.csv`)
+  }
+
+  const handleEnviarSistema = async () => {
+    if (!canSendSL) return
+    setEnviandoSL(true)
+    setSlResult(null)
+    try {
+      const res = await sendToSistemaLeads({ jobId, credentials })
+      setSlResult(res)
+    } catch (e) {
+      setSlResult({ status: 'error', message: e.message })
+    } finally {
+      setEnviandoSL(false)
+    }
   }
 
   const handleEnviarCRM = async () => {
@@ -225,6 +242,36 @@ export default function BusquedaLeadsPage() {
               {crmResult.message}
               {typeof crmResult.leads_sent === 'number' && (
                 <span className="block mt-1">Enviados: {crmResult.leads_sent}</span>
+              )}
+            </div>
+          )}
+
+          <button
+            onClick={handleEnviarSistema}
+            disabled={!canSendSL}
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-indigo-400 hover:bg-indigo-500 disabled:bg-white/10 disabled:text-white/40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            {enviandoSL ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> Enviando al Sistema...</>
+            ) : (
+              <><Share2 className="w-4 h-4" /> Enviar a Sistema de Leads</>
+            )}
+          </button>
+
+          {slResult && (
+            <div className={`text-xs rounded-lg px-3 py-2 border ${
+              slResult.status === 'success'
+                ? 'text-indigo-200 bg-indigo-500/10 border-indigo-400/30'
+                : 'text-red-200 bg-red-500/10 border-red-500/30'
+            }`}>
+              {slResult.message}
+              {typeof slResult.leads_sent === 'number' && (
+                <span className="block mt-1">
+                  Enviados: {slResult.leads_sent}
+                  {typeof slResult.leads_failed === 'number' && slResult.leads_failed > 0 && (
+                    <> · Fallaron: {slResult.leads_failed}</>
+                  )}
+                </span>
               )}
             </div>
           )}

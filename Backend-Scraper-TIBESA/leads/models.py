@@ -78,3 +78,10 @@ class EnviarCRMRequest(BaseModel):
     job_id: str
     etiqueta: str = Field(..., max_length=30, min_length=1)
     correo_electronico: str
+
+
+# ---------- Sistema de Leads (n8n) ----------
+
+class EnviarSistemaLeadsRequest(BaseModel):
+    job_id: str
+    correo_electronico: str

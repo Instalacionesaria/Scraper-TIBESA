@@ -70,6 +70,13 @@ export function sendToCrm({ jobId, etiqueta, credentials }) {
   })
 }
 
+export function sendToSistemaLeads({ jobId, credentials }) {
+  return post('/api/leads/sistema-leads/send', {
+    job_id: jobId,
+    correo_electronico: credentials.correo_electronico,
+  })
+}
+
 export function getJob(jobId) {
   return get(`/api/leads/jobs/${jobId}`)
 }

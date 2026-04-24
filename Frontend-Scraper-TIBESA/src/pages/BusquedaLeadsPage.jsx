@@ -88,9 +88,9 @@ export default function BusquedaLeadsPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Parámetros */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
+        <div className="lg:col-span-2 bg-white border border-gray-200 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-gray-800 mb-5">Parámetros de Búsqueda</h2>
 
           <div className="space-y-4">
@@ -161,9 +161,9 @@ export default function BusquedaLeadsPage() {
         </div>
 
         {/* Etiqueta CRM */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-gray-800 mb-1">Etiqueta para CRM de TIBESA</h2>
-          <p className="text-sm text-gray-500 mb-5">Identifica y organiza tus leads en el CRM</p>
+        <div className="bg-[#2c3e50] border border-white/10 rounded-xl p-6 text-white">
+          <h2 className="text-lg font-semibold mb-1">Etiqueta para CRM de TIBESA</h2>
+          <p className="text-sm text-white/60 mb-5">Identifica y organiza tus leads en el CRM</p>
 
           <div className="space-y-4">
             <div>
@@ -173,9 +173,9 @@ export default function BusquedaLeadsPage() {
                 onChange={(e) => setEtiqueta(e.target.value.slice(0, MAX_ETIQUETA_LEN))}
                 placeholder="Ej: Leads Peluquerias Lima - Enero 2025"
                 maxLength={MAX_ETIQUETA_LEN}
-                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-transparent"
+                className="w-full px-3 py-2.5 bg-white/5 border border-white/15 rounded-lg text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-sky-400/60 focus:border-transparent"
               />
-              <p className="text-xs text-gray-500 mt-1.5">
+              <p className="text-xs text-white/50 mt-1.5">
                 Esta etiqueta te ayudará a identificar y organizar tus leads en CRM de TIBESA (máx. {MAX_ETIQUETA_LEN} caracteres)
               </p>
             </div>
@@ -183,7 +183,7 @@ export default function BusquedaLeadsPage() {
             <button
               onClick={handleEnviarCRM}
               disabled={!canSendCRM}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-emerald-500 hover:bg-emerald-600 disabled:bg-white/10 disabled:text-white/40 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               {enviandoCRM ? (
                 <><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</>
@@ -195,8 +195,8 @@ export default function BusquedaLeadsPage() {
             {crmResult && (
               <div className={`text-sm rounded-lg px-3 py-2 border ${
                 crmResult.status === 'success'
-                  ? 'text-green-700 bg-green-50 border-green-200'
-                  : 'text-red-700 bg-red-50 border-red-200'
+                  ? 'text-emerald-200 bg-emerald-500/10 border-emerald-400/30'
+                  : 'text-red-200 bg-red-500/10 border-red-400/30'
               }`}>
                 {crmResult.message}
                 {typeof crmResult.leads_sent === 'number' && (
@@ -205,8 +205,8 @@ export default function BusquedaLeadsPage() {
               </div>
             )}
 
-            <div className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 flex items-start gap-2">
-              <span className="text-gray-400 mt-0.5">ⓘ</span>
+            <div className="text-xs text-white/60 bg-white/5 border border-white/10 rounded-lg px-3 py-2 flex items-start gap-2">
+              <span className="text-white/40 mt-0.5">ⓘ</span>
               <span>Esta opción solo se habilita una vez que se termine el scrapeo de los Leads</span>
             </div>
           </div>

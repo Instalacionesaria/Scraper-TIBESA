@@ -6,6 +6,13 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
+# ---------- Auth ----------
+
+class LoginRequest(BaseModel):
+    correo_electronico: str
+    password: str
+
+
 # ---------- Google Places ----------
 
 class GooglePlacesRequest(BaseModel):

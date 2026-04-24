@@ -28,6 +28,10 @@ async function get(path) {
 
 // ---------- Endpoints ----------
 
+export function login({ correo_electronico, password }) {
+  return post('/api/leads/auth/login', { correo_electronico, password })
+}
+
 export function startGooglePlaces({ businessType, location, getEmails, credentials }) {
   return post('/api/leads/google-places/start', {
     businessType,

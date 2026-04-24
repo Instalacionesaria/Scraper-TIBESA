@@ -1,5 +1,6 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import { Building2, BarChart3, Settings, LogOut, Search, Facebook } from 'lucide-react'
+import { clearCredentials, getCredentials } from '../lib/auth'
 
 const navItems = [
   { to: '/leads', label: 'Búsqueda de Leads', icon: Search },
@@ -10,6 +11,14 @@ const navItems = [
 ]
 
 export default function Sidebar() {
+  const navigate = useNavigate()
+  const creds = getCredentials()
+
+  const handleLogout = () => {
+    clearCredentials()
+    navigate('/login', { replace: true })
+  }
+
   return (
     <aside className="w-56 bg-[#2c3e50] text-white flex flex-col min-h-screen fixed left-0 top-0">
       {/* Logo */}
@@ -48,8 +57,20 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t border-white/10">
-        <div className="text-xs text-white/40 mb-2">
+      <div className="p-4 border-t border-white/10 space-y-3">
+        {creds?.correo_electronico && (
+          <div className="text-[11px] text-white/50 truncate" title={creds.correo_electronico}>
+            {creds.correo_electronico}
+          </div>
+        )}
+        <button
+          onClick={handleLogout}
+          className="w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-white/80 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          Cerrar sesión
+        </button>
+        <div className="text-xs text-white/40">
           Propiedades Scrapeadas
           <span className="float-right text-white font-semibold text-sm">0</span>
         </div>

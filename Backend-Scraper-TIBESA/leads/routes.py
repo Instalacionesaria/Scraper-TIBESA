@@ -26,6 +26,7 @@ from .models import (
     FacebookAdsRequest,
     FacebookPagesRequest,
     GooglePlacesRequest,
+    LoginRequest,
 )
 from .supabase_client import (
     authenticate_user,
@@ -44,6 +45,22 @@ WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "")
 
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
+
+
+# ============================================================================
+# AUTH — Login del usuario TIBESA
+# ============================================================================
+
+@router.post("/auth/login")
+async def login(request: LoginRequest) -> Dict[str, Any]:
+    """Valida correo/password contra Supabase y devuelve datos básicos del usuario."""
+    user = authenticate_user(request.correo_electronico, request.password)
+    return {
+        "status": "success",
+        "userId": user.get("id"),
+        "correo_electronico": user.get("correo_electronico"),
+        "nombre": user.get("nombre") or user.get("name"),
+    }
 
 
 # ============================================================================

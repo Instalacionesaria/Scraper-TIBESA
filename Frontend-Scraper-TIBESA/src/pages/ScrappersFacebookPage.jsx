@@ -9,6 +9,7 @@ import {
   sendToCrm,
 } from '../lib/leadsApi'
 import { downloadCsv } from '../lib/csv'
+import LeadsTable from '../components/LeadsTable'
 
 const MAX_ETIQUETA_LEN = 30
 
@@ -225,6 +226,10 @@ export default function ScrappersFacebookPage() {
             </div>
           </div>
         </div>
+
+        {statusPages === 'done' && pagesData.length > 0 && (
+          <LeadsTable rows={pagesData} title="Páginas de Facebook scrapeadas" />
+        )}
       </div>
 
       {/* Panel lateral oscuro: Etiqueta CRM */}

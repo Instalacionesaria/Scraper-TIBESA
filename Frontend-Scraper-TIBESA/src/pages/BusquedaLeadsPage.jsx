@@ -4,6 +4,7 @@ import { Play, Loader2, Send, AlertTriangle, Download } from 'lucide-react'
 import { getCredentials } from '../lib/auth'
 import { startGooglePlaces, pollJobUntilDone, sendToCrm } from '../lib/leadsApi'
 import { downloadCsv } from '../lib/csv'
+import LeadsTable from '../components/LeadsTable'
 
 const MAX_ETIQUETA_LEN = 30
 
@@ -169,6 +170,10 @@ export default function BusquedaLeadsPage() {
             )}
           </div>
         </div>
+
+        {status === 'done' && leads.length > 0 && (
+          <LeadsTable rows={leads} title="Leads scrapeados" />
+        )}
       </div>
 
       {/* Panel lateral oscuro: Etiqueta CRM */}

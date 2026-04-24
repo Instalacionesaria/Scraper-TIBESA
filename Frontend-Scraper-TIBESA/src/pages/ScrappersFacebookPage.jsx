@@ -126,7 +126,7 @@ export default function ScrappersFacebookPage() {
 
   return (
     <div className="flex gap-6 -mr-8 min-h-[calc(100vh-4rem)]">
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 overflow-hidden">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-1">Scrappers de Facebook</h1>
           <p className="text-sm text-gray-500">Extrae leads de la biblioteca de anuncios de Facebook</p>

@@ -20,7 +20,7 @@ function Shell({ children }) {
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />
-      <main className="flex-1 ml-56 p-8">{children}</main>
+      <main className="flex-1 ml-56 p-8 min-w-0 overflow-hidden">{children}</main>
     </div>
   )
 }

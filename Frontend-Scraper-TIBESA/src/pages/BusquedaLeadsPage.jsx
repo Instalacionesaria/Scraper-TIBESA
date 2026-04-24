@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Play, Loader2, Send, AlertTriangle } from 'lucide-react'
+import { Play, Loader2, Send, AlertTriangle, Download } from 'lucide-react'
 import { getCredentials } from '../lib/auth'
 import { startGooglePlaces, pollJobUntilDone, sendToCrm } from '../lib/leadsApi'
+import { downloadCsv } from '../lib/csv'
 
 const MAX_ETIQUETA_LEN = 30
 
@@ -15,6 +16,7 @@ export default function BusquedaLeadsPage() {
   const [status, setStatus] = useState('idle') // idle | scraping | done | error
   const [jobId, setJobId] = useState(null)
   const [resultsCount, setResultsCount] = useState(0)
+  const [leads, setLeads] = useState([])
   const [errorMsg, setErrorMsg] = useState('')
 
   const [enviandoCRM, setEnviandoCRM] = useState(false)
@@ -25,12 +27,14 @@ export default function BusquedaLeadsPage() {
 
   const canStart = hasAuth && tipoNegocio.trim() && localizacion.trim() && status !== 'scraping'
   const canSendCRM = status === 'done' && etiqueta.trim() && !enviandoCRM && jobId
+  const canDownloadCsv = status === 'done' && leads.length > 0
 
   const handleStart = async () => {
     if (!canStart) return
     setStatus('scraping')
     setErrorMsg('')
     setResultsCount(0)
+    setLeads([])
     setCrmResult(null)
 
     try {
@@ -45,6 +49,7 @@ export default function BusquedaLeadsPage() {
       const job = await pollJobUntilDone(newJobId)
       if (job.status === 'COMPLETED') {
         setResultsCount(job.results_count || 0)
+        setLeads(job.results?.data || [])
         setStatus('done')
       } else {
         setErrorMsg(`El trabajo terminó con estado: ${job.status}`)
@@ -55,6 +60,12 @@ export default function BusquedaLeadsPage() {
       setErrorMsg(e.message || 'Error desconocido')
       setStatus('error')
     }
+  }
+
+  const handleDownloadCsv = () => {
+    if (!canDownloadCsv) return
+    const slug = (tipoNegocio + '-' + localizacion).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    downloadCsv(leads, `leads-${slug || 'tibesa'}-${jobId?.slice(0, 8) || Date.now()}.csv`)
   }
 
   const handleEnviarCRM = async () => {
@@ -179,6 +190,14 @@ export default function BusquedaLeadsPage() {
               Esta etiqueta te ayudará a identificar y organizar tus leads en CRM de TIBESA (máx. {MAX_ETIQUETA_LEN} caracteres)
             </p>
           </div>
+
+          <button
+            onClick={handleDownloadCsv}
+            disabled={!canDownloadCsv}
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-sky-500 hover:bg-sky-600 disabled:bg-white/10 disabled:text-white/40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            <Download className="w-4 h-4" /> Descargar CSV
+          </button>
 
           <button
             onClick={handleEnviarCRM}

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Facebook, Play, Loader2, Send, Info, AlertTriangle } from 'lucide-react'
+import { Facebook, Play, Loader2, Send, Info, AlertTriangle, Download } from 'lucide-react'
 import { getCredentials } from '../lib/auth'
 import {
   startFacebookAds,
@@ -8,6 +8,7 @@ import {
   pollJobUntilDone,
   sendToCrm,
 } from '../lib/leadsApi'
+import { downloadCsv } from '../lib/csv'
 
 const MAX_ETIQUETA_LEN = 30
 
@@ -25,6 +26,7 @@ export default function ScrappersFacebookPage() {
   const [statusPages, setStatusPages] = useState('idle')
   const [pagesJobId, setPagesJobId] = useState(null)
   const [pagesCount, setPagesCount] = useState(0)
+  const [pagesData, setPagesData] = useState([])
   const [errorPages, setErrorPages] = useState('')
 
   // Paso 3: CRM
@@ -37,6 +39,7 @@ export default function ScrappersFacebookPage() {
   const canScrapeAds = hasAuth && urlBiblioteca.trim() && statusAds !== 'running'
   const canScrapePages = statusAds === 'done' && adsPages.length > 0 && statusPages !== 'running'
   const canSendCRM = statusPages === 'done' && etiqueta.trim() && !enviandoCRM && pagesJobId
+  const canDownloadCsv = statusPages === 'done' && pagesData.length > 0
 
   const handleScrapeAds = async () => {
     if (!canScrapeAds) return
@@ -78,6 +81,7 @@ export default function ScrappersFacebookPage() {
     if (!canScrapePages) return
     setStatusPages('running')
     setErrorPages('')
+    setPagesData([])
     setCrmResult(null)
 
     try {
@@ -91,12 +95,18 @@ export default function ScrappersFacebookPage() {
         return
       }
       setPagesCount(job.results_count || 0)
+      setPagesData(job.results?.data || [])
       setStatusPages('done')
     } catch (e) {
       console.error(e)
       setErrorPages(e.message || 'Error desconocido')
       setStatusPages('error')
     }
+  }
+
+  const handleDownloadCsv = () => {
+    if (!canDownloadCsv) return
+    downloadCsv(pagesData, `facebook-pages-${pagesJobId?.slice(0, 8) || Date.now()}.csv`)
   }
 
   const handleEnviarCRM = async () => {
@@ -236,6 +246,14 @@ export default function ScrappersFacebookPage() {
               Esta etiqueta te ayudará a identificar y organizar tus leads en CRM de TIBESA (máx. {MAX_ETIQUETA_LEN} caracteres)
             </p>
           </div>
+
+          <button
+            onClick={handleDownloadCsv}
+            disabled={!canDownloadCsv}
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-sky-500 hover:bg-sky-600 disabled:bg-white/10 disabled:text-white/40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            <Download className="w-4 h-4" /> Descargar CSV
+          </button>
 
           <button
             onClick={handleEnviarCRM}

@@ -1,10 +1,11 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Building2, BarChart3, Settings, LogOut, Search, Facebook } from 'lucide-react'
+import { Building2, BarChart3, Settings, LogOut, Search, Facebook, Linkedin } from 'lucide-react'
 import { clearCredentials, getCredentials } from '../lib/auth'
 
 const navItems = [
   { to: '/leads', label: 'Búsqueda de Leads', icon: Search },
   { to: '/facebook', label: 'Scrappers de Facebook', icon: Facebook },
+  { to: '/linkedin', label: 'Scraper de LinkedIn', icon: Linkedin },
   { to: '/', label: 'Scraper de Propiedades Específicas', icon: Building2 },
   { to: '/resultados', label: 'Resultados', icon: BarChart3 },
   { to: '/configuracion', label: 'Configuración', icon: Settings },

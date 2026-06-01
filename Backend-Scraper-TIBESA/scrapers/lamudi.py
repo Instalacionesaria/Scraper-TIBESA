@@ -19,8 +19,9 @@ class LamudiScraper(BaseScraper):
     Enfocado en datos de mercado: precio, superficie, tipo, recámaras, etc.
     """
 
-    def __init__(self, output_dir: str = "data", headless: bool = True):
-        super().__init__(output_dir, headless)
+    def __init__(self, output_dir: str = "data", headless: bool = True,
+                 descargar_imagenes: bool = True):
+        super().__init__(output_dir, headless, descargar_imagenes)
         self.site_name = "lamudi"
         self.image_downloader = ImageDownloader(str(self.images_dir))
         self.normalizer = DataNormalizer()
@@ -209,9 +210,12 @@ class LamudiScraper(BaseScraper):
         if property_id:
             data['property_id'] = property_id
 
-        # Descargar solo 1 imagen representativa
-        print("🖼️  Extrayendo imagen principal...")
-        data['imagenes'], data['imagenes_descargadas'] = await self._extraer_imagen_principal(page, data['url'])
+        # Descargar solo 1 imagen representativa (se omite si descargar_imagenes=False)
+        if self.descargar_imagenes:
+            print("🖼️  Extrayendo imagen principal...")
+            data['imagenes'], data['imagenes_descargadas'] = await self._extraer_imagen_principal(page, data['url'])
+        else:
+            data['imagenes'], data['imagenes_descargadas'] = [], []
 
         return data
 

@@ -11,7 +11,7 @@ const SUGGESTIONS = [
   'Dame un resumen de las propiedades scrapeadas',
 ]
 
-export default function ChatPanel({ properties }) {
+export default function ChatPanel({ properties, fuente = null }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -51,12 +51,12 @@ export default function ChatPanel({ properties }) {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg, properties: propsForChat }),
+        body: JSON.stringify({ message: userMsg, properties: propsForChat, fuente }),
       })
 
       const data = await res.json()
       setMessages(prev => [...prev, { role: 'assistant', content: data.response || data.detail || 'Error al procesar' }])
-    } catch (err) {
+    } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'No se pudo conectar al servidor. Verifica que el backend esté corriendo.' }])
     } finally {
       setLoading(false)

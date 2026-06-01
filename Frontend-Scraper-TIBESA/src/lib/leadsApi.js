@@ -53,6 +53,18 @@ export function startFacebookAds({ url, credentials }) {
   })
 }
 
+export function startLinkedIn({ jobTitle, country, state, numberOfLeads, credentials }) {
+  return post('/api/leads/linkedin/start', {
+    jobTitle,
+    country,
+    state,
+    numberOfLeads,
+    userId: credentials.userId || null,
+    correo_electronico: credentials.correo_electronico,
+    timestamp: new Date().toISOString(),
+  })
+}
+
 export function startFacebookPages({ pages, credentials }) {
   return post('/api/leads/facebook/pages/start', {
     pages,

@@ -5,6 +5,7 @@ import ResultadosPage from './pages/ResultadosPage'
 import ConfiguracionPage from './pages/ConfiguracionPage'
 import BusquedaLeadsPage from './pages/BusquedaLeadsPage'
 import ScrappersFacebookPage from './pages/ScrappersFacebookPage'
+import ScraperLinkedInPage from './pages/ScraperLinkedInPage'
 import LoginPage from './pages/LoginPage'
 import { hasCredentials } from './lib/auth'
 
@@ -38,6 +39,7 @@ function App() {
                 <Route path="/" element={<ScraperPage />} />
                 <Route path="/leads" element={<BusquedaLeadsPage />} />
                 <Route path="/facebook" element={<ScrappersFacebookPage />} />
+                <Route path="/linkedin" element={<ScraperLinkedInPage />} />
                 <Route path="/resultados" element={<ResultadosPage />} />
                 <Route path="/configuracion" element={<ConfiguracionPage />} />
               </Routes>

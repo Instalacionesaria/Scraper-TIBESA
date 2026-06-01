@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 import json
 import os
+import time
+import random
 from pathlib import Path
 from datetime import datetime
 import asyncio
@@ -24,7 +26,10 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from scrapers.paraiso_dorado import ParaisoDoradoScraper
 from scrapers.lamudi import LamudiScraper
 from scrapers.mitula import MitulaScraper
+from scrapers.remax_sunset_eagle import RemaxSunsetEagleScraper
+import aiohttp
 from utils.agente_propiedades import procesar_propiedad_con_llm
+from utils.propiedades_db import upsert_propiedades, obtener_propiedades, estado_propiedades, registrar_scrapeo
 from playwright.async_api import async_playwright
 
 # Brochure generator
@@ -66,6 +71,13 @@ SCRAPERS_MAP = {
         'listado_url': 'https://casas.mitula.mx/casas/casas-mazatlan',
         'scrape_from_listing': True,  # Indica que se scrapea directo del listado
     },
+    'remax_sunset_eagle': {
+        'class': RemaxSunsetEagleScraper,
+        'domain': 'es.remaxsunseteagle.com',
+        'name': 'RE/MAX Sunset Eagle',
+        'listado_url': 'https://es.remaxsunseteagle.com/propiedades-mazatlan/',
+        'is_remax': True,  # Soporta filtro por zona
+    },
 }
 
 # Configurar CORS
@@ -87,6 +99,13 @@ IMAGES_DIR = DATA_DIR / "imagenes"
 
 JSON_DIR.mkdir(parents=True, exist_ok=True)
 IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+
+# Propiedades scrapeadas en paralelo en los scrapers de detalle (Lamudi, Paraíso).
+# 3 = más conservador para reducir el riesgo de bloqueo anti-bot (Lamudi).
+CONCURRENCIA_DETALLE = 3
+# Pausa aleatoria (segundos) antes de cada propiedad, para parecer humano y no
+# golpear al sitio en ráfagas sincronizadas.
+DELAY_MIN, DELAY_MAX = 1.0, 3.5
 
 
 # ========================================
@@ -219,17 +238,16 @@ async def _extraer_urls_lamudi(config: dict) -> List[str]:
 
                 print(f"   → {nuevas} nuevas URLs (total: {len(urls)})")
 
-                # Si no encontramos nuevas URLs, terminamos
+                # Si la página no aportó URLs nuevas, llegamos al final del listado.
+                # (Antes se usaba un selector de "botón siguiente" que Lamudi ya cambió;
+                #  apoyarse en "0 nuevas" es más robusto.)
                 if nuevas == 0:
                     print("   → Sin nuevas propiedades, fin de la paginación")
                     break
 
-                # Verificar si hay página siguiente
-                next_btn = await page.query_selector(
-                    'a[rel="next"], [class*="pagination"] a:has-text(">")'
-                )
-                if not next_btn:
-                    print("   → No hay botón siguiente, fin de la paginación")
+                # Tope de seguridad para no quedar en bucle infinito
+                if num_pagina >= 80:
+                    print("   → Tope de seguridad de 80 páginas alcanzado")
                     break
 
                 num_pagina += 1
@@ -262,10 +280,13 @@ async def health_check():
 
 
 @app.get("/api/scrape/stream/{site_id}")
-async def scrape_stream(site_id: str, request: Request):
+async def scrape_stream(site_id: str, request: Request, zona: Optional[int] = None):
     """
     Endpoint SSE: Scrapea todas las propiedades de un sitio y transmite
     cada resultado en tiempo real al frontend.
+
+    Query params:
+    - zona: (solo RE/MAX) ID de zona 1-8. Si se omite, scrapea las 8 zonas.
 
     Eventos enviados:
     - phase: fase actual (extracting_urls, scraping)
@@ -279,11 +300,133 @@ async def scrape_stream(site_id: str, request: Request):
 
     config = SCRAPERS_MAP[site_id]
 
+    if config.get('is_remax'):
+        zona_ids = [zona] if zona else list(RemaxSunsetEagleScraper.ZONAS.keys())
+        if zona and zona not in RemaxSunsetEagleScraper.ZONAS:
+            raise HTTPException(status_code=400, detail=f"Zona {zona} inválida. Válidas: 1-8")
+        return EventSourceResponse(_event_generator_remax(site_id, config, zona_ids, request))
+
     # Mitula usa un flujo diferente: scrapea directo del listado
     if config.get('scrape_from_listing'):
         return EventSourceResponse(_event_generator_listing(site_id, config, request))
     else:
         return EventSourceResponse(_event_generator_detail(site_id, config, request))
+
+
+async def _event_generator_remax(site_id: str, config: dict, zona_ids: List[int], request: Request):
+    """Generador SSE para RE/MAX Sunset Eagle: discovery por zona(s) + detalle por propiedad."""
+    scraper = RemaxSunsetEagleScraper(
+        output_dir="data",
+        descargar_imagenes=True,
+        max_imagenes_por_propiedad=1,
+    )
+
+    zonas_label = (
+        f"zona {scraper.ZONAS[zona_ids[0]]}"
+        if len(zona_ids) == 1
+        else f"{len(zona_ids)} zonas"
+    )
+
+    yield {
+        "event": "phase",
+        "data": json.dumps({
+            "phase": "extracting_urls",
+            "message": f"Buscando propiedades en {config['name']} ({zonas_label})...",
+        }),
+    }
+
+    all_targets: List[tuple] = []  # [(url, zona_nombre)]
+    try:
+        async with aiohttp.ClientSession(headers=scraper.DEFAULT_HEADERS) as session:
+            for zid in zona_ids:
+                if await request.is_disconnected():
+                    return
+                urls, _ = await scraper.discover_urls_por_zona(session, zid)
+                zona_nombre = scraper.ZONAS[zid]
+                all_targets.extend([(u, zona_nombre) for u in urls])
+    except Exception as e:
+        yield {"event": "error", "data": json.dumps({"message": f"Error en discovery: {str(e)}"})}
+        return
+
+    total = len(all_targets)
+    if total == 0:
+        yield {"event": "error", "data": json.dumps({"message": "No se encontraron propiedades en las zonas solicitadas"})}
+        return
+
+    yield {
+        "event": "phase",
+        "data": json.dumps({
+            "phase": "scraping",
+            "message": f"Scrapeando {total} propiedades de {config['name']}...",
+            "total": total,
+        }),
+    }
+
+    exitosas = 0
+    fallidas = 0
+    propiedades_guardar = []
+    inicio = time.monotonic()
+    iniciado_iso = datetime.utcnow().isoformat()
+
+    async with aiohttp.ClientSession(headers=scraper.DEFAULT_HEADERS) as session:
+        for idx, (url, zona_nombre) in enumerate(all_targets, 1):
+            if await request.is_disconnected():
+                break
+
+            percent = round((idx / total) * 100) if total > 0 else 0
+            yield {
+                "event": "progress",
+                "data": json.dumps({"current": idx, "total": total, "percent": percent, "url": url}),
+            }
+
+            try:
+                prop = await scraper.extraer_detalle(session, url, zona_nombre)
+                if not prop:
+                    raise RuntimeError("extraer_detalle devolvió None")
+
+                exitosas += 1
+                propiedades_guardar.append(prop)
+                resumen = {
+                    "index": idx,
+                    "total": total,
+                    "titulo": prop.get("titulo") or "Sin título",
+                    "precio": prop.get("precio") or "N/A",
+                    "ubicacion": prop.get("ubicacion") or "N/A",
+                    "tipo_propiedad": prop.get("tipo_propiedad") or "N/A",
+                    "zona": prop.get("zona"),
+                    "descripcion_comercial": "",
+                    "destacados_venta": prop.get("amenidades", [])[:5],
+                    "num_imagenes": len(prop.get("imagenes_descargadas", [])),
+                    "url": prop.get("url", ""),
+                    "procesado_con_ia": False,
+                    "terreno": prop.get("terreno", {}),
+                    "construccion": {},
+                    "espacios_interiores": prop.get("caracteristicas", {}),
+                }
+                yield {"event": "property", "data": json.dumps(resumen, ensure_ascii=False)}
+
+            except Exception as e:
+                fallidas += 1
+                yield {
+                    "event": "property_error",
+                    "data": json.dumps({"index": idx, "url": url, "error": str(e)}),
+                }
+
+    # Persistir en Supabase (UPSERT por fuente, property_id) + registrar duración
+    await asyncio.to_thread(upsert_propiedades, site_id, propiedades_guardar)
+    duracion = time.monotonic() - inicio
+    await asyncio.to_thread(registrar_scrapeo, site_id, exitosas, duracion, iniciado_iso, datetime.utcnow().isoformat())
+
+    yield {
+        "event": "done",
+        "data": json.dumps({
+            "total": total,
+            "exitosas": exitosas,
+            "con_ia": 0,
+            "fallidas": fallidas,
+            "duracion_segundos": round(duracion, 1),
+        }),
+    }
 
 
 async def _event_generator_listing(site_id: str, config: dict, request: Request):
@@ -296,6 +439,8 @@ async def _event_generator_listing(site_id: str, config: dict, request: Request)
     scraper = config['class'](output_dir="data")
     exitosas = 0
     idx = 0
+    inicio = time.monotonic()
+    iniciado_iso = datetime.utcnow().isoformat()
 
     try:
         propiedades = await scraper.extraer_todas_las_propiedades()
@@ -337,6 +482,11 @@ async def _event_generator_listing(site_id: str, config: dict, request: Request)
 
         yield {"event": "property", "data": json.dumps(resumen, ensure_ascii=False)}
 
+    # Persistir en Supabase (UPSERT por fuente, property_id) + registrar duración
+    await asyncio.to_thread(upsert_propiedades, site_id, propiedades)
+    duracion = time.monotonic() - inicio
+    await asyncio.to_thread(registrar_scrapeo, site_id, exitosas, duracion, iniciado_iso, datetime.utcnow().isoformat())
+
     yield {
         "event": "done",
         "data": json.dumps({
@@ -344,12 +494,61 @@ async def _event_generator_listing(site_id: str, config: dict, request: Request)
             "exitosas": exitosas,
             "con_ia": 0,
             "fallidas": 0,
+            "duracion_segundos": round(duracion, 1),
         })
     }
 
 
+# Cada cuántas propiedades se vuelca el avance a Supabase (para no perder progreso)
+FLUSH_CADA = 25
+
+# Fallos seguidos que disparan el "cortacircuitos" (probable bloqueo del sitio)
+UMBRAL_BLOQUEO = 8
+
+
+def _es_error_de_cuota(data: dict) -> bool:
+    """Detecta si el LLM falló por falta de crédito/cuota de OpenAI."""
+    analisis = data.get('analisis_llm')
+    err = str(analisis.get('error', '')).lower() if isinstance(analisis, dict) else ''
+    return any(k in err for k in (
+        'insufficient_quota', 'exceeded your current quota', 'quota', 'billing',
+        'insufficient funds', 'payment',
+    ))
+
+
+def _extraccion_vacia(data: dict) -> bool:
+    """True si la página no devolvió datos clave (señal de página bloqueada/captcha)."""
+    return not (data.get('titulo') or data.get('precio'))
+
+
+# Títulos típicos de páginas de bloqueo/captcha (Lamudi, Cloudflare, etc.)
+_TITULOS_BLOQUEO = (
+    'confirme que es humano', 'are you human', 'verifying you are human',
+    'just a moment', 'attention required', 'access denied', 'acceso denegado',
+    'captcha', 'robot', 'verificación', 'verificacion', 'one more step',
+)
+
+
+def _pagina_bloqueada(data: dict) -> bool:
+    """True si el contenido indica una página de captcha/bloqueo (aunque traiga título)."""
+    titulo = str(data.get('titulo') or '').lower()
+    return any(k in titulo for k in _TITULOS_BLOQUEO)
+
+
+def _pagina_invalida(data: dict) -> bool:
+    """Página sin datos útiles: vacía o bloqueada (no debe guardarse)."""
+    return _extraccion_vacia(data) or _pagina_bloqueada(data)
+
+
 async def _event_generator_detail(site_id: str, config: dict, request: Request):
-    """Generador SSE para scrapers que navegan a cada propiedad (Paraíso Dorado, Lamudi)"""
+    """Generador SSE para scrapers que navegan a cada propiedad (Paraíso Dorado, Lamudi).
+
+    Optimizado: un solo navegador compartido + N propiedades en paralelo (semáforo).
+    No descarga imágenes (el cliente solo consulta/conversa con la IA sobre texto).
+    """
+    inicio = time.monotonic()
+    iniciado_iso = datetime.utcnow().isoformat()
+
     # Fase 1: Extraer URLs
     yield {
         "event": "phase",
@@ -368,71 +567,151 @@ async def _event_generator_detail(site_id: str, config: dict, request: Request):
         "data": json.dumps({"phase": "scraping", "message": f"Scrapeando {total} propiedades...", "total": total})
     }
 
-    # Fase 2: Scrapear cada propiedad
-    scraper = config['class'](output_dir="data")
+    # Fase 2: Scrapear en paralelo (sin imágenes)
+    scraper = config['class'](output_dir="data", descargar_imagenes=False)
     exitosas = 0
     con_ia = 0
+    guardadas_total = 0          # cuántas se han volcado a Supabase
+    buffer = []                  # propiedades pendientes de volcar
+    sin_credito = False          # se agotó el crédito de OpenAI
+    posible_bloqueo = False      # el sitio parece estar bloqueándonos
+    fallos_seguidos = 0          # contador para el cortacircuitos
 
-    for idx, url in enumerate(urls, 1):
-        if await request.is_disconnected():
-            return
+    async def _flush():
+        """Vuelca el buffer a Supabase y lo limpia (guardado incremental)."""
+        nonlocal buffer, guardadas_total
+        if buffer:
+            await asyncio.to_thread(upsert_propiedades, site_id, buffer)
+            guardadas_total += len(buffer)
+            buffer = []
 
-        percent = round((idx / total) * 100)
-        yield {
-            "event": "progress",
-            "data": json.dumps({"current": idx, "total": total, "percent": percent, "url": url})
-        }
+    sem = asyncio.Semaphore(CONCURRENCIA_DETALLE)
+    cola: asyncio.Queue = asyncio.Queue()
+
+    async def _procesar(idx: int, url: str, context):
+        """Worker: scrapea una propiedad + LLM, y deja el resultado en la cola."""
+        async with sem:
+            # Pausa aleatoria para escalonar las peticiones (anti-bloqueo)
+            await asyncio.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
+            try:
+                data = await scraper.extraer_con_contexto(context, url)
+                ia = False
+                if data.get('descripcion'):
+                    try:
+                        # El LLM es síncrono (red): lo corremos en un hilo para no
+                        # bloquear el event loop y permitir las llamadas en paralelo.
+                        data = await asyncio.to_thread(procesar_propiedad_con_llm, data)
+                        analisis = data.get('analisis_llm') or {}
+                        ia = isinstance(analisis, dict) and bool(analisis) and 'error' not in analisis
+                    except Exception:
+                        pass
+                await cola.put((idx, url, data, ia, None))
+            except Exception as e:
+                await cola.put((idx, url, None, False, str(e)))
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(**scraper.get_browser_config())
+        context = await browser.new_context(**scraper.get_context_config())
+        await context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
+        )
+
+        tasks = [asyncio.create_task(_procesar(i, u, context)) for i, u in enumerate(urls, 1)]
 
         try:
-            resultado = await scraper.extraer_informacion(url)
+            for completado in range(1, total + 1):
+                if await request.is_disconnected():
+                    break
 
-            # Procesar con IA
-            if resultado.get('descripcion'):
-                try:
-                    resultado = procesar_propiedad_con_llm(resultado)
+                idx, url, data, ia, err = await cola.get()
+
+                yield {
+                    "event": "progress",
+                    "data": json.dumps({
+                        "current": completado, "total": total,
+                        "percent": round(completado / total * 100) if total else 0, "url": url,
+                    })
+                }
+
+                # Fallo de scraping (timeout/error) o página inválida (vacía o captcha/bloqueo)
+                if err or not data or _pagina_invalida(data):
+                    fallos_seguidos += 1
+                    motivo_fallo = err or ("captcha/bloqueo" if data and _pagina_bloqueada(data) else "página sin datos")
+                    yield {
+                        "event": "property_error",
+                        "data": json.dumps({"index": idx, "total": total, "url": url, "error": motivo_fallo})
+                    }
+                    # Cortacircuitos: demasiados fallos seguidos → probable bloqueo del sitio
+                    if fallos_seguidos >= UMBRAL_BLOQUEO:
+                        posible_bloqueo = True
+                        yield {
+                            "event": "warning",
+                            "data": json.dumps({
+                                "message": f"{fallos_seguidos} fallos seguidos: el sitio podría estar bloqueándonos. "
+                                           "Finalizando y guardando lo avanzado hasta aquí."
+                            })
+                        }
+                        break
+                    continue
+
+                fallos_seguidos = 0  # hubo éxito → reiniciar el contador
+
+                # Se acabó el crédito de OpenAI → finalizar limpio guardando lo avanzado
+                if _es_error_de_cuota(data):
+                    sin_credito = True
+                    yield {
+                        "event": "warning",
+                        "data": json.dumps({
+                            "message": "Se agotó el crédito/cuota de OpenAI. Finalizando y guardando lo avanzado hasta aquí."
+                        })
+                    }
+                    break
+
+                exitosas += 1
+                if ia:
                     con_ia += 1
-                except Exception:
-                    pass
+                buffer.append(data)
 
-            # Guardar JSON
-            prop_id = resultado.get('property_id', idx)
-            json_path = JSON_DIR / f"{site_id}_{prop_id}.json"
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(resultado, f, indent=2, ensure_ascii=False)
+                # Guardado incremental: cada FLUSH_CADA propiedades se vuelcan a Supabase
+                if len(buffer) >= FLUSH_CADA:
+                    await _flush()
 
-            exitosas += 1
+                # Guardar JSON local
+                prop_id = data.get('property_id', idx)
+                json_path = JSON_DIR / f"{site_id}_{prop_id}.json"
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
 
-            # Preparar resumen para el frontend
-            analisis = resultado.get('analisis_llm', {})
-            resumen = {
-                "index": idx,
-                "total": total,
-                "titulo": resultado.get('titulo', 'Sin título'),
-                "precio": resultado.get('precio', 'N/A'),
-                "ubicacion": resultado.get('ubicacion', 'N/A'),
-                "tipo_propiedad": resultado.get('tipo_propiedad') or analisis.get('tipo_propiedad', 'N/A'),
-                "descripcion_comercial": analisis.get('descripcion_comercial', ''),
-                "destacados_venta": analisis.get('destacados_venta', []),
-                "num_imagenes": len(resultado.get('imagenes_descargadas', [])),
-                "url": url,
-                "procesado_con_ia": resultado.get('procesado_con_llm', False),
-                "terreno": analisis.get('terreno', {}),
-                "construccion": analisis.get('construccion', {}),
-                "espacios_interiores": analisis.get('espacios_interiores', {}),
-            }
+                analisis = data.get('analisis_llm', {}) if isinstance(data.get('analisis_llm'), dict) else {}
+                resumen = {
+                    "index": idx,
+                    "total": total,
+                    "titulo": data.get('titulo', 'Sin título'),
+                    "precio": data.get('precio', 'N/A'),
+                    "ubicacion": data.get('ubicacion', 'N/A'),
+                    "tipo_propiedad": data.get('tipo_propiedad') or analisis.get('tipo_propiedad', 'N/A'),
+                    "descripcion_comercial": analisis.get('descripcion_comercial', ''),
+                    "destacados_venta": analisis.get('destacados_venta', []),
+                    "num_imagenes": len(data.get('imagenes_descargadas', [])),
+                    "url": url,
+                    "procesado_con_ia": data.get('procesado_con_llm', False),
+                    "terreno": analisis.get('terreno', {}),
+                    "construccion": analisis.get('construccion', {}),
+                    "espacios_interiores": analisis.get('espacios_interiores', {}),
+                }
+                yield {"event": "property", "data": json.dumps(resumen, ensure_ascii=False)}
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            await browser.close()
 
-            yield {"event": "property", "data": json.dumps(resumen, ensure_ascii=False)}
+    # Volcar el remanente del buffer (guardado incremental) + registrar duración
+    await _flush()
+    duracion = time.monotonic() - inicio
+    await asyncio.to_thread(registrar_scrapeo, site_id, guardadas_total, duracion, iniciado_iso, datetime.utcnow().isoformat())
 
-        except Exception as e:
-            yield {
-                "event": "property_error",
-                "data": json.dumps({"index": idx, "total": total, "url": url, "error": str(e)})
-            }
-
-        # Delay entre requests
-        await asyncio.sleep(1.5)
-
-    # Completado
+    # Completado (motivo: completado normal o corte por falta de crédito)
     yield {
         "event": "done",
         "data": json.dumps({
@@ -440,6 +719,13 @@ async def _event_generator_detail(site_id: str, config: dict, request: Request):
             "exitosas": exitosas,
             "con_ia": con_ia,
             "fallidas": total - exitosas,
+            "guardadas": guardadas_total,
+            "duracion_segundos": round(duracion, 1),
+            "motivo": (
+                "sin_credito_openai" if sin_credito
+                else "posible_bloqueo" if posible_bloqueo
+                else "completado"
+            ),
         })
     }
 
@@ -473,13 +759,74 @@ async def list_properties():
     return {"success": True, "count": len(propiedades), "properties": propiedades}
 
 
+@app.get("/api/propiedades/estado")
+async def propiedades_estado():
+    """
+    Frescura de los datos guardados por portal: total de propiedades y fecha de
+    última actualización. El frontend lo usa para mostrar "actualizado hace X días"
+    y ofrecer consultar lo guardado en vez de volver a scrapear.
+    """
+    estado = await asyncio.to_thread(estado_propiedades)
+    return {"success": True, "estado": estado}
+
+
+@app.get("/api/propiedades")
+async def propiedades_guardadas(fuente: Optional[str] = None, limit: int = 500):
+    """
+    Devuelve las propiedades ya guardadas en Supabase (sin scrapear), en el mismo
+    formato de tarjeta que emite el scraping en vivo.
+    Filtra por portal con ?fuente=paraiso_dorado|lamudi|mitula|remax_sunset_eagle.
+    """
+    payloads = await asyncio.to_thread(obtener_propiedades, fuente, limit)
+    propiedades = [_resumen_card(p, i) for i, p in enumerate(payloads, 1)]
+    return {"success": True, "count": len(propiedades), "properties": propiedades}
+
+
 # ========================================
 # CHAT CON IA SOBRE PROPIEDADES SCRAPEADAS
 # ========================================
 
+def _resumen_card(data: dict, index: int = 0) -> dict:
+    """Convierte el payload completo de una propiedad al formato que renderiza PropertyCard
+    (el mismo que emiten los eventos SSE 'property'). Se usa para mostrar datos guardados."""
+    analisis = data.get('analisis_llm', {}) if isinstance(data.get('analisis_llm'), dict) else {}
+    imagenes = data.get('imagenes_descargadas') or data.get('imagenes') or []
+    return {
+        "index": index,
+        "titulo": data.get('titulo', 'Sin título'),
+        "precio": data.get('precio', 'N/A'),
+        "ubicacion": data.get('ubicacion', 'N/A'),
+        "tipo_propiedad": data.get('tipo_propiedad') or analisis.get('tipo_propiedad', 'N/A'),
+        "descripcion_comercial": analisis.get('descripcion_comercial', ''),
+        "destacados_venta": analisis.get('destacados_venta', []),
+        "num_imagenes": len(imagenes) if isinstance(imagenes, list) else 0,
+        "url": data.get('url', ''),
+        "procesado_con_ia": data.get('procesado_con_llm', bool(analisis)),
+        "terreno": analisis.get('terreno', {}) or data.get('terreno', {}),
+        "construccion": analisis.get('construccion', {}),
+        "espacios_interiores": analisis.get('espacios_interiores', {}) or data.get('caracteristicas', {}),
+    }
+
+
+def _resumen_para_chat(data: dict) -> dict:
+    """Reduce el payload completo de una propiedad a los campos que usa el chat."""
+    analisis = data.get('analisis_llm', {}) if isinstance(data.get('analisis_llm'), dict) else {}
+    return {
+        "titulo": data.get("titulo"),
+        "precio": data.get("precio"),
+        "ubicacion": data.get("ubicacion"),
+        "tipo_propiedad": data.get("tipo_propiedad") or analisis.get("tipo_propiedad"),
+        "descripcion_comercial": analisis.get("descripcion_comercial", ""),
+        "terreno": analisis.get("terreno", {}) or data.get("terreno", {}),
+        "construccion": analisis.get("construccion", {}),
+        "espacios_interiores": analisis.get("espacios_interiores", {}) or data.get("caracteristicas", {}),
+    }
+
+
 class ChatRequest(BaseModel):
     message: str
     properties: Optional[List[dict]] = None  # Propiedades del frontend (en memoria)
+    fuente: Optional[str] = None  # Filtrar por portal al leer de Supabase (opcional)
 
 
 @app.post("/api/chat")
@@ -494,26 +841,22 @@ async def chat_propiedades(req: ChatRequest):
     if not api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY no configurada")
 
-    # Usar propiedades enviadas desde el frontend o cargar del disco
+    # Fuentes de datos para el chat, en orden de prioridad:
+    #   1) Propiedades que el frontend ya tiene en memoria (req.properties)
+    #   2) Supabase (datos persistidos: el cliente consulta SIN volver a scrapear)
+    #   3) Disco local (fallback)
     propiedades = req.properties
+
+    if not propiedades:
+        payloads = await asyncio.to_thread(obtener_propiedades, req.fuente)
+        propiedades = [_resumen_para_chat(p) for p in payloads]
+
     if not propiedades:
         json_files = list(JSON_DIR.glob("*.json"))
-        propiedades = []
         for jf in sorted(json_files, reverse=True)[:100]:
             try:
                 with open(jf, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    analisis = data.get('analisis_llm', {})
-                    propiedades.append({
-                        "titulo": data.get("titulo"),
-                        "precio": data.get("precio"),
-                        "ubicacion": data.get("ubicacion"),
-                        "tipo_propiedad": data.get("tipo_propiedad") or analisis.get("tipo_propiedad"),
-                        "descripcion_comercial": analisis.get("descripcion_comercial", ""),
-                        "terreno": analisis.get("terreno", {}),
-                        "construccion": analisis.get("construccion", {}),
-                        "espacios_interiores": analisis.get("espacios_interiores", {}),
-                    })
+                    propiedades.append(_resumen_para_chat(json.load(f)))
             except Exception:
                 continue
 

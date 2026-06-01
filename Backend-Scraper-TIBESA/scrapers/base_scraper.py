@@ -19,18 +19,22 @@ class BaseScraper(ABC):
     Define la estructura y funcionalidad común que todos los scrapers deben implementar.
     """
     
-    def __init__(self, output_dir: str = "data", headless: bool = True):
+    def __init__(self, output_dir: str = "data", headless: bool = True,
+                 descargar_imagenes: bool = True):
         """
         Inicializa el scraper base
-        
+
         Args:
             output_dir: Directorio donde se guardarán los datos e imágenes
             headless: Si es False, muestra el navegador (útil para debugging)
+            descargar_imagenes: Si es False, se omite la extracción/descarga de
+                imágenes (más rápido; el cliente solo consulta texto con la IA)
         """
         self.output_dir = Path(output_dir)
         self.images_dir = self.output_dir / "imagenes"
         self.json_dir = self.output_dir / "json"
         self.headless = headless
+        self.descargar_imagenes = descargar_imagenes
         
         # Crear directorios si no existen
         self.images_dir.mkdir(parents=True, exist_ok=True)
@@ -142,36 +146,54 @@ class BaseScraper(ABC):
         Returns:
             dict: Diccionario con toda la información extraída
         """
-        print(f"\n{'='*80}")
-        print(f"🏠 SCRAPEANDO [{self.site_name.upper()}]: {url}")
-        print(f"{'='*80}\n")
-        
         async with async_playwright() as p:
             # Lanzar navegador con configuración
             browser_config = self.get_browser_config()
             browser = await p.chromium.launch(**browser_config)
-            
+
             context_config = self.get_context_config()
             context = await browser.new_context(**context_config)
-            
+
             # Ocultar que es automatización
             await context.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', {
                     get: () => undefined
                 });
             """)
-            
-            page = await context.new_page()
-            
+
+            try:
+                return await self.extraer_con_contexto(context, url)
+            finally:
+                await browser.close()
+
+    async def extraer_con_contexto(self, context, url: str) -> Dict[str, Any]:
+        """
+        Scrapea una propiedad usando un contexto/navegador YA abierto.
+        Permite reutilizar un único navegador para muchas propiedades y
+        ejecutarlas en paralelo (varias páginas a la vez en el mismo navegador).
+        """
+        page = await context.new_page()
+        try:
+            return await self._scrape_page(page, url)
+        finally:
+            await page.close()
+
+    async def _scrape_page(self, page: Page, url: str) -> Dict[str, Any]:
+        """Lógica de extracción sobre una página ya creada (sin manejar el navegador)."""
+        print(f"\n{'='*80}")
+        print(f"🏠 SCRAPEANDO [{self.site_name.upper()}]: {url}")
+        print(f"{'='*80}\n")
+
+        if True:
             try:
                 # Navegar a la página
                 print("⏳ Cargando página...")
                 await page.goto(url, wait_until='networkidle', timeout=60000)
                 print("✓ Página cargada\n")
-                
+
                 # Esperar a que cargue
                 await self.wait_for_page_load(page)
-                
+
                 # Estructura de datos base
                 data = {
                     'url': url,
@@ -249,10 +271,7 @@ class BaseScraper(ABC):
                 import traceback
                 traceback.print_exc()
                 raise
-            
-            finally:
-                await browser.close()
-    
+
     async def guardar_datos(self, data: Dict[str, Any]):
         """
         Guarda los datos extraídos en formato JSON.

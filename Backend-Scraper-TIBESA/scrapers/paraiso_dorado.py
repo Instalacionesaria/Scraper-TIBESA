@@ -19,15 +19,17 @@ class ParaisoDoradoScraper(BaseScraper):
     Extrae información de propiedades inmobiliarias en Mazatlán
     """
     
-    def __init__(self, output_dir: str = "data", headless: bool = True):
+    def __init__(self, output_dir: str = "data", headless: bool = True,
+                 descargar_imagenes: bool = True):
         """
         Inicializa el scraper de Paraíso Dorado
-        
+
         Args:
             output_dir: Directorio donde se guardarán los datos
             headless: Si es False, muestra el navegador
+            descargar_imagenes: Si es False, se omite la descarga de imágenes
         """
-        super().__init__(output_dir, headless)
+        super().__init__(output_dir, headless, descargar_imagenes)
         self.site_name = "paraiso_dorado"
         self.image_downloader = ImageDownloader(str(self.images_dir))
         self.normalizer = DataNormalizer()
@@ -119,9 +121,12 @@ class ParaisoDoradoScraper(BaseScraper):
         print("👤 Extrayendo información del agente...")
         data['agente'] = await self._extraer_agente(page)
         
-        # Extraer y descargar imágenes
-        print("🖼️  Extrayendo imágenes...")
-        data['imagenes'], data['imagenes_descargadas'] = await self._extraer_imagenes(page, data['url'])
+        # Extraer y descargar imágenes (se omite si descargar_imagenes=False)
+        if self.descargar_imagenes:
+            print("🖼️  Extrayendo imágenes...")
+            data['imagenes'], data['imagenes_descargadas'] = await self._extraer_imagenes(page, data['url'])
+        else:
+            data['imagenes'], data['imagenes_descargadas'] = [], []
         
         # Normalizar precio
         if data.get('precio'):

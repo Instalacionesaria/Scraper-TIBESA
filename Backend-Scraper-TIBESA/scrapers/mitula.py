@@ -44,12 +44,14 @@ class MitulaScraper:
 
         Args:
             callback: async function(event, data) para reportar progreso
-            max_pages: Límite de páginas (0 = sin límite)
+            max_pages: Límite de páginas (0 = sin límite, con tope de seguridad)
 
         Returns:
             list: Lista de propiedades extraídas
         """
         todas = []
+        seen_ids = set()  # evita contar dos veces si una página se repite
+        TOPE_SEGURIDAD = 60  # ~1800 propiedades; corta loops infinitos
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(
@@ -102,10 +104,18 @@ class MitulaScraper:
                     print("   → Sin propiedades, fin de la paginación")
                     break
 
-                print(f"   → {len(cards)} propiedades extraídas")
+                # Quitar duplicados ya vistos en páginas anteriores
+                cards = [c for c in cards if c.get('property_id') not in seen_ids]
+                if not cards:
+                    print("   → Solo propiedades repetidas, fin de la paginación")
+                    break
+
+                print(f"   → {len(cards)} propiedades nuevas extraídas")
 
                 # Procesar cada card
                 for card in cards:
+                    if card.get('property_id'):
+                        seen_ids.add(card['property_id'])
                     card['site'] = self.site_name
                     card['empresa'] = 'Mitula'
                     card['fecha_scraping'] = datetime.now().isoformat()
@@ -137,11 +147,13 @@ class MitulaScraper:
                     if callback:
                         await callback('property', card)
 
-                # Verificar si hay más páginas
+                # Verificar si hay más páginas: el paginador real usa enlaces ?page=N
+                # (el selector antiguo .pagination__page ya no existe en Mitula).
                 has_next = await page.query_selector(
-                    f'.pagination__page a[href*="page={num_pagina + 1}"]'
+                    f'a[href*="page={num_pagina + 1}"]'
                 )
-                if not has_next or (max_pages > 0 and num_pagina >= max_pages):
+                limite = max_pages if max_pages > 0 else TOPE_SEGURIDAD
+                if not has_next or num_pagina >= limite:
                     print("   → Fin de la paginación")
                     break
 

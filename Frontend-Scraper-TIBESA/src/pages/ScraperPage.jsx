@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Building2, Sparkles, Play, Loader2, CheckCircle2, Globe, XCircle, Database, Clock, Timer } from 'lucide-react'
+import { Building2, Sparkles, Play, Loader2, CheckCircle2, Globe, XCircle, Database, Clock, Timer, ShieldAlert } from 'lucide-react'
 import PropertyCard from '../components/PropertyCard'
 import ChatPanel from '../components/ChatPanel'
 import SummaryPanel from '../components/SummaryPanel'
@@ -81,6 +81,61 @@ const SITES = [
       { id: 7, label: 'Nuevo Mazatlán', count: 9 },
       { id: 8, label: 'Este Mazatlán', count: 61 },
     ],
+  },
+  {
+    id: 'pincali',
+    name: 'Pincali',
+    domain: 'pincali.com',
+    description: 'Portal inmobiliario nacional. ~240 terrenos en venta en Mazatlán, con datos estructurados (precio, superficie, ubicación).',
+    totalProperties: 240,
+  },
+  {
+    id: 'depreventa',
+    name: 'DePreventa',
+    domain: 'depreventa.mx',
+    description: 'Inmobiliaria de preventa en Mazatlán. ~15 terrenos con datos completos (precio, m², descripción, fotos) vía HTTP directo — sin anti-bot.',
+    totalProperties: 15,
+  },
+  {
+    id: 'century21',
+    name: 'Century 21',
+    domain: 'century21mexico.com',
+    description: 'Inmobiliaria internacional. ~150 propiedades en venta en Mazatlán (terrenos, casas, deptos). Datos completos vía API JSON — sin anti-bot. Incluye contacto del asesor.',
+    totalProperties: 150,
+  },
+  {
+    id: 'casasyterrenos',
+    name: 'Casas y Terrenos',
+    domain: 'casasyterrenos.com',
+    description: 'Portal inmobiliario nacional. ~60 terrenos en venta en Mazatlán. Datos estructurados completos (precio, superficie, colonia, coordenadas, imágenes) vía HTTP directo — sin anti-bot, muy rápido.',
+    totalProperties: 60,
+  },
+  {
+    id: 'propiedades_com',
+    name: 'Propiedades.com',
+    domain: 'propiedades.com',
+    description: 'Portal inmobiliario nacional (~580 terrenos en Mazatlán). Protegido por Akamai Bot Manager: bloquea los scrapers automatizados. Descartado.',
+    totalProperties: null,
+    disabled: true,
+    blocked: true,
+  },
+  {
+    id: 'marina_mazatlan',
+    name: 'Marina Mazatlán',
+    domain: 'marinamazatlan.com.mx',
+    description: 'Sitio inmobiliario de Marina Mazatlán. El servidor bloquea las conexiones de scrapers (no responde a peticiones automatizadas). Descartado.',
+    totalProperties: null,
+    disabled: true,
+    blocked: true,
+  },
+  {
+    id: 'vivanuncios',
+    name: 'Vivanuncios',
+    domain: 'vivanuncios.com.mx',
+    description: 'Portal de clasificados (grupo eBay/Adevinta). Protegido por Cloudflare con reto interactivo (Turnstile). Probado incluso con técnicas avanzadas (Chrome real, patchright undetected) sin éxito. Descartado.',
+    totalProperties: null,
+    disabled: true,
+    blocked: true,
   },
   {
     id: 'invest_mazatlan',
@@ -306,6 +361,11 @@ export default function ScraperPage() {
                     <CheckCircle2 className="w-3 h-3" /> Completado
                   </span>
                 )}
+                {site.blocked && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
+                    <ShieldAlert className="w-3 h-3" /> Bloquea scrapers
+                  </span>
+                )}
               </div>
 
               <p className="text-sm text-gray-600 mb-3">{site.description}</p>
@@ -360,7 +420,9 @@ export default function ScraperPage() {
                       })()
                     : site.totalProperties
                       ? `~${site.totalProperties} propiedades`
-                      : 'Próximamente'
+                      : site.blocked
+                        ? 'Descartado — bloquea scrapers'
+                        : 'Próximamente'
                   }
                 </span>
                 {!site.disabled && (
@@ -369,8 +431,8 @@ export default function ScraperPage() {
                       <button
                         onClick={() => handleConsultarGuardado(site.id)}
                         disabled={isActive || isLoadingSaved}
-                        title="Cargar lo guardado sin volver a scrapear"
-                        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                        title="Cargar lo guardado sin volver a scrapear (instantáneo)"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
                       >
                         {isLoadingSaved ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
                         Consultar guardado
@@ -384,6 +446,8 @@ export default function ScraperPage() {
                           ? 'bg-red-500 text-white hover:bg-red-600'
                           : isActive
                           ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : tieneGuardado
+                          ? 'border border-gray-300 text-gray-600 bg-white hover:bg-gray-50'
                           : 'bg-[#2c3e50] text-white hover:bg-[#34495e]'
                       }`}
                     >

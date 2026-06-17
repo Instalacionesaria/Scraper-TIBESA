@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import json
 import os
+import re
 import time
 import random
 from pathlib import Path
@@ -27,6 +28,11 @@ from scrapers.paraiso_dorado import ParaisoDoradoScraper
 from scrapers.lamudi import LamudiScraper
 from scrapers.mitula import MitulaScraper
 from scrapers.remax_sunset_eagle import RemaxSunsetEagleScraper
+from scrapers.pincali import PincaliScraper
+from scrapers.propiedades_com import PropiedadesComScraper
+from scrapers.casasyterrenos import CasasYTerrenosScraper
+from scrapers.century21 import Century21Scraper
+from scrapers.depreventa import DepreventaScraper
 import aiohttp
 from utils.agente_propiedades import procesar_propiedad_con_llm
 from utils.propiedades_db import upsert_propiedades, obtener_propiedades, estado_propiedades, registrar_scrapeo
@@ -78,6 +84,41 @@ SCRAPERS_MAP = {
         'listado_url': 'https://es.remaxsunseteagle.com/propiedades-mazatlan/',
         'is_remax': True,  # Soporta filtro por zona
     },
+    'pincali': {
+        'class': PincaliScraper,
+        'domain': 'www.pincali.com',
+        'name': 'Pincali',
+        # Listado de terrenos en venta en Mazatlán (paginado con ?page=N)
+        'listado_url': 'https://www.pincali.com/inmuebles/terrenos-en-venta-en-mazatlan-sinaloa',
+    },
+    'propiedades_com': {
+        'class': PropiedadesComScraper,
+        'domain': 'propiedades.com',
+        'name': 'Propiedades.com',
+        # Terrenos habitacionales en venta en Mazatlán (paginado con ?pagina=N)
+        'listado_url': 'https://propiedades.com/mazatlan/terrenos-habitacionales-venta',
+    },
+    'casasyterrenos': {
+        'class': CasasYTerrenosScraper,
+        'domain': 'www.casasyterrenos.com',
+        'name': 'Casas y Terrenos',
+        'listado_url': 'https://www.casasyterrenos.com/sinaloa/mazatlan/terrenos/venta',
+        'scrape_from_listing': True,  # HTTP plano + __NEXT_DATA__, sin navegador
+    },
+    'century21': {
+        'class': Century21Scraper,
+        'domain': 'century21mexico.com',
+        'name': 'Century 21',
+        'listado_url': 'https://century21mexico.com/v/resultados/operacion_venta/en-pais_mexico/en-estado_sinaloa/en-municipio_mazatlan',
+        'scrape_from_listing': True,  # HTTP plano + API ?json=true, sin navegador
+    },
+    'depreventa': {
+        'class': DepreventaScraper,
+        'domain': 'depreventa.mx',
+        'name': 'DePreventa',
+        'listado_url': 'https://depreventa.mx/categoria/terrenos/',
+        'scrape_from_listing': True,  # WordPress HTTP plano, sin navegador
+    },
 }
 
 # Configurar CORS
@@ -118,6 +159,10 @@ async def extraer_urls_del_listado(site_id: str) -> List[str]:
 
     if site_id == 'lamudi':
         return await _extraer_urls_lamudi(config)
+    elif site_id == 'pincali':
+        return await _extraer_urls_pincali(config)
+    elif site_id == 'propiedades_com':
+        return await _extraer_urls_propiedades_com(config)
     else:
         return await _extraer_urls_paraiso_dorado(config)
 
@@ -261,6 +306,160 @@ async def _extraer_urls_lamudi(config: dict) -> List[str]:
     return sorted(urls)
 
 
+async def _extraer_urls_pincali(config: dict) -> List[str]:
+    """Extractor de URLs para Pincali (paginado con ?page=N).
+
+    Pincali está tras AWS WAF (action: challenge): hay que usar un navegador real
+    con la config anti-detección y `networkidle` para que el reto JS asigne la
+    cookie `aws-waf-token` y sirva el HTML. HTTP plano recibe 202 vacío.
+    """
+    urls = set()
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=['--disable-blink-features=AutomationControlled',
+                  '--disable-dev-shm-usage', '--no-sandbox']
+        )
+        context = await browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            locale='es-MX',
+            timezone_id='America/Mexico_City'
+        )
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        """)
+
+        page = await context.new_page()
+
+        try:
+            base_url = config['listado_url']
+            num_pagina = 1
+
+            while True:
+                page_url = base_url if num_pagina == 1 else f"{base_url}?page={num_pagina}"
+                print(f"📄 Pincali - Página {num_pagina}: {page_url}")
+
+                await page.goto(page_url, wait_until='networkidle', timeout=60000)
+                # El reto del WAF puede tardar; esperar a que aparezcan las fichas
+                await page.wait_for_timeout(4000)
+
+                enlaces = await page.query_selector_all('a[href*="/inmueble/"]')
+                nuevas = 0
+                for enlace in enlaces:
+                    href = await enlace.get_attribute('href')
+                    if href and '/inmueble/' in href:
+                        full_url = href if href.startswith('http') else f"https://{config['domain']}{href}"
+                        # Normalizar: quitar query/fragmentos
+                        full_url = full_url.split('?')[0].split('#')[0]
+                        if full_url not in urls:
+                            urls.add(full_url)
+                            nuevas += 1
+
+                print(f"   → {nuevas} nuevas URLs (total: {len(urls)})")
+
+                # Sin nuevas propiedades = fin de la paginación
+                if nuevas == 0:
+                    print("   → Sin nuevas propiedades, fin de la paginación")
+                    break
+
+                # Tope de seguridad
+                if num_pagina >= 40:
+                    print("   → Tope de seguridad de 40 páginas alcanzado")
+                    break
+
+                num_pagina += 1
+                await page.wait_for_timeout(1500)
+
+        finally:
+            await browser.close()
+
+    return sorted(urls)
+
+
+async def _extraer_urls_propiedades_com(config: dict) -> List[str]:
+    """Extractor de URLs para Propiedades.com (paginado con ?pagina=N).
+
+    Protegido por Akamai Bot Manager: hay que esperar a que el reto JS se resuelva
+    solo (recargar muy rápido lo escala a "Access Denied"). Las fichas son
+    `/inmuebles/{slug}-{id}`. Las cookies del reto persisten en el contexto, así
+    que solo la primera página paga el costo del challenge.
+    """
+    urls = set()
+    titulos_reto = ('challenge validation', 'access denied', 'pardon our interruption')
+
+    async def esperar_contenido(page) -> bool:
+        """Espera con paciencia a que cargue el contenido real (no el reto)."""
+        for _ in range(6):
+            titulo = (await page.title() or '').lower()
+            if not any(k in titulo for k in titulos_reto) and len(await page.content()) > 8000:
+                return True
+            await page.wait_for_timeout(3000)
+        return False
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=['--disable-blink-features=AutomationControlled',
+                  '--disable-dev-shm-usage', '--no-sandbox']
+        )
+        context = await browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            locale='es-MX',
+            timezone_id='America/Mexico_City'
+        )
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        """)
+        page = await context.new_page()
+
+        try:
+            base_url = config['listado_url']
+            num_pagina = 1
+
+            while True:
+                page_url = base_url if num_pagina == 1 else f"{base_url}?pagina={num_pagina}"
+                print(f"📄 Propiedades.com - Página {num_pagina}: {page_url}")
+
+                await page.goto(page_url, wait_until='networkidle', timeout=60000)
+                if not await esperar_contenido(page):
+                    print("   → Reto Akamai no resuelto, fin de la paginación")
+                    break
+
+                enlaces = await page.query_selector_all('a[href*="/inmuebles/"]')
+                nuevas = 0
+                for enlace in enlaces:
+                    href = await enlace.get_attribute('href')
+                    if href and '/inmuebles/' in href:
+                        full_url = href if href.startswith('http') else f"https://{config['domain']}{href}"
+                        # Normalizar: quitar query/fragmentos (#tipos=...&pos=N)
+                        full_url = full_url.split('?')[0].split('#')[0]
+                        # Solo fichas individuales (terminan en -<id numérico>)
+                        if re.search(r'-\d{6,}$', full_url) and full_url not in urls:
+                            urls.add(full_url)
+                            nuevas += 1
+
+                print(f"   → {nuevas} nuevas URLs (total: {len(urls)})")
+
+                if nuevas == 0:
+                    print("   → Sin nuevas propiedades, fin de la paginación")
+                    break
+                if num_pagina >= 30:
+                    print("   → Tope de seguridad de 30 páginas alcanzado")
+                    break
+
+                num_pagina += 1
+                # Pausa entre páginas para no irritar a Akamai
+                await page.wait_for_timeout(2500)
+
+        finally:
+            await browser.close()
+
+    return sorted(urls)
+
+
 # ========================================
 # ENDPOINTS
 # ========================================
@@ -364,9 +563,17 @@ async def _event_generator_remax(site_id: str, config: dict, zona_ids: List[int]
 
     exitosas = 0
     fallidas = 0
-    propiedades_guardar = []
+    guardadas_total = 0
+    buffer = []
     inicio = time.monotonic()
     iniciado_iso = datetime.utcnow().isoformat()
+
+    async def _flush():
+        nonlocal buffer, guardadas_total
+        if buffer:
+            await asyncio.to_thread(upsert_propiedades, site_id, buffer)
+            guardadas_total += len(buffer)
+            buffer = []
 
     async with aiohttp.ClientSession(headers=scraper.DEFAULT_HEADERS) as session:
         for idx, (url, zona_nombre) in enumerate(all_targets, 1):
@@ -385,7 +592,9 @@ async def _event_generator_remax(site_id: str, config: dict, zona_ids: List[int]
                     raise RuntimeError("extraer_detalle devolvió None")
 
                 exitosas += 1
-                propiedades_guardar.append(prop)
+                buffer.append(prop)
+                if len(buffer) >= FLUSH_CADA:
+                    await _flush()
                 resumen = {
                     "index": idx,
                     "total": total,
@@ -412,10 +621,10 @@ async def _event_generator_remax(site_id: str, config: dict, zona_ids: List[int]
                     "data": json.dumps({"index": idx, "url": url, "error": str(e)}),
                 }
 
-    # Persistir en Supabase (UPSERT por fuente, property_id) + registrar duración
-    await asyncio.to_thread(upsert_propiedades, site_id, propiedades_guardar)
+    # Volcar remanente (guardado incremental) + registrar duración
+    await _flush()
     duracion = time.monotonic() - inicio
-    await asyncio.to_thread(registrar_scrapeo, site_id, exitosas, duracion, iniciado_iso, datetime.utcnow().isoformat())
+    await asyncio.to_thread(registrar_scrapeo, site_id, guardadas_total, duracion, iniciado_iso, datetime.utcnow().isoformat())
 
     yield {
         "event": "done",
@@ -424,6 +633,7 @@ async def _event_generator_remax(site_id: str, config: dict, zona_ids: List[int]
             "exitosas": exitosas,
             "con_ia": 0,
             "fallidas": fallidas,
+            "guardadas": guardadas_total,
             "duracion_segundos": round(duracion, 1),
         }),
     }

@@ -33,6 +33,10 @@ from scrapers.propiedades_com import PropiedadesComScraper
 from scrapers.casasyterrenos import CasasYTerrenosScraper
 from scrapers.century21 import Century21Scraper
 from scrapers.depreventa import DepreventaScraper
+from scrapers.trovit import TrovitScraper
+from scrapers.mazatlanbr import MazatlanBienesRaicesScraper
+from scrapers.icasas import IcasasScraper
+from scrapers.spezia import SpeziaScraper
 import aiohttp
 from utils.agente_propiedades import procesar_propiedad_con_llm
 from utils.propiedades_db import upsert_propiedades, obtener_propiedades, estado_propiedades, registrar_scrapeo
@@ -118,6 +122,34 @@ SCRAPERS_MAP = {
         'name': 'DePreventa',
         'listado_url': 'https://depreventa.mx/categoria/terrenos/',
         'scrape_from_listing': True,  # WordPress HTTP plano, sin navegador
+    },
+    'trovit': {
+        'class': TrovitScraper,
+        'domain': 'casas.trovit.com.mx',
+        'name': 'Trovit',
+        'listado_url': 'https://casas.trovit.com.mx/terreno-mazatlan',
+        'scrape_from_listing': True,  # agregador; Playwright (bloquea HTTP plano)
+    },
+    'mazatlan_br': {
+        'class': MazatlanBienesRaicesScraper,
+        'domain': 'mazatlanbienesraicesenventa.com',
+        'name': 'Mazatlán Bienes Raíces',
+        'listado_url': 'https://mazatlanbienesraicesenventa.com/lotes/en-venta',
+        'scrape_from_listing': True,  # PHP/CodeIgniter HTTP plano, sin navegador
+    },
+    'icasas': {
+        'class': IcasasScraper,
+        'domain': 'www.icasas.mx',
+        'name': 'iCasas',
+        'listado_url': 'https://www.icasas.mx/venta/tierras-lotes-terrenos-sinaloa-mazatlan-5_9_25_0_1875_0',
+        'scrape_from_listing': True,  # agregador Lifull Connect; HTTP plano + microdata, sin navegador
+    },
+    'spezia': {
+        'class': SpeziaScraper,
+        'domain': 'www.speziamazatlan.com.mx',
+        'name': 'Spezia Mazatlán',
+        'listado_url': 'https://www.speziamazatlan.com.mx/inmuebles/terrenos-residenciales-en-venta-en-mazatlan/',
+        'scrape_from_listing': True,  # WordPress (Inwave) HTTP plano, sin navegador
     },
 }
 

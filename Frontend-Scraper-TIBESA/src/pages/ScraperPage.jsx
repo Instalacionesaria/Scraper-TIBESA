@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Building2, Sparkles, Play, Loader2, CheckCircle2, Globe, XCircle, Database, Clock, Timer, ShieldAlert } from 'lucide-react'
+import { Building2, Sparkles, Play, Loader2, CheckCircle2, Globe, XCircle, Database, Clock, Timer, ShieldAlert, Copy } from 'lucide-react'
 import PropertyCard from '../components/PropertyCard'
 import ChatPanel from '../components/ChatPanel'
 import SummaryPanel from '../components/SummaryPanel'
@@ -90,6 +90,20 @@ const SITES = [
     totalProperties: 240,
   },
   {
+    id: 'mazatlan_br',
+    name: 'Mazatlán Bienes Raíces',
+    domain: 'mazatlanbienesraicesenventa.com',
+    description: 'Inmobiliaria directa de Mazatlán. ~7 lotes/terrenos grandes (hectáreas) con descripción e imágenes vía HTTP directo — sin anti-bot.',
+    totalProperties: 7,
+  },
+  {
+    id: 'trovit',
+    name: 'Trovit',
+    domain: 'casas.trovit.com.mx',
+    description: '⚠️ Agregador (recopila de otros portales). ~99 terrenos en Mazatlán. Puede duplicar propiedades ya capturadas por Lamudi/otros. Vía Playwright.',
+    totalProperties: 99,
+  },
+  {
     id: 'depreventa',
     name: 'DePreventa',
     domain: 'depreventa.mx',
@@ -109,6 +123,20 @@ const SITES = [
     domain: 'casasyterrenos.com',
     description: 'Portal inmobiliario nacional. ~60 terrenos en venta en Mazatlán. Datos estructurados completos (precio, superficie, colonia, coordenadas, imágenes) vía HTTP directo — sin anti-bot, muy rápido.',
     totalProperties: 60,
+  },
+  {
+    id: 'spezia',
+    name: 'Spezia Mazatlán',
+    domain: 'speziamazatlan.com.mx',
+    description: 'Inmobiliaria directa de Mazatlán (WordPress). ~6 terrenos residenciales con precio, m², descripción e imágenes vía HTTP directo — sin anti-bot. Parte de su inventario también aparece en Pincali.',
+    totalProperties: 6,
+  },
+  {
+    id: 'icasas',
+    name: 'iCasas',
+    domain: 'icasas.mx',
+    description: '⚠️ Agregador (red Lifull Connect, como Mitula/Trovit). ~334 terrenos en venta en Mazatlán con datos completos (precio, descripción, agencia, coordenadas) vía HTTP directo — sin anti-bot, muy rápido. Puede duplicar propiedades de otros portales.',
+    totalProperties: 334,
   },
   {
     id: 'propiedades_com',
@@ -136,6 +164,15 @@ const SITES = [
     totalProperties: null,
     disabled: true,
     blocked: true,
+  },
+  {
+    id: 'easyaviso',
+    name: 'EasyAviso',
+    domain: 'easyaviso.com',
+    description: 'Espejo / white-label de Pincali: mismo inventario, mismas fichas (239 vs 240 terrenos). Scrapearlo duplicaría los datos de Pincali. Descartado por redundante.',
+    totalProperties: null,
+    disabled: true,
+    duplicate: true,
   },
   {
     id: 'invest_mazatlan',
@@ -366,6 +403,11 @@ export default function ScraperPage() {
                     <ShieldAlert className="w-3 h-3" /> Bloquea scrapers
                   </span>
                 )}
+                {site.duplicate && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                    <Copy className="w-3 h-3" /> Duplicado
+                  </span>
+                )}
               </div>
 
               <p className="text-sm text-gray-600 mb-3">{site.description}</p>
@@ -422,7 +464,9 @@ export default function ScraperPage() {
                       ? `~${site.totalProperties} propiedades`
                       : site.blocked
                         ? 'Descartado — bloquea scrapers'
-                        : 'Próximamente'
+                        : site.duplicate
+                          ? 'Descartado — duplicado de Pincali'
+                          : 'Próximamente'
                   }
                 </span>
                 {!site.disabled && (

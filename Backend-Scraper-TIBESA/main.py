@@ -37,6 +37,8 @@ from scrapers.trovit import TrovitScraper
 from scrapers.mazatlanbr import MazatlanBienesRaicesScraper
 from scrapers.icasas import IcasasScraper
 from scrapers.spezia import SpeziaScraper
+from scrapers.realtor import RealtorScraper
+from scrapers.buscatucasa import BuscaTuCasaScraper
 import aiohttp
 from utils.agente_propiedades import procesar_propiedad_con_llm
 from utils.propiedades_db import upsert_propiedades, obtener_propiedades, estado_propiedades, registrar_scrapeo
@@ -150,6 +152,20 @@ SCRAPERS_MAP = {
         'name': 'Spezia Mazatlán',
         'listado_url': 'https://www.speziamazatlan.com.mx/inmuebles/terrenos-residenciales-en-venta-en-mazatlan/',
         'scrape_from_listing': True,  # WordPress (Inwave) HTTP plano, sin navegador
+    },
+    'realtor': {
+        'class': RealtorScraper,
+        'domain': 'www.realtor.com',
+        'name': 'Realtor.com International',
+        'listado_url': 'https://www.realtor.com/international/mx/mazatlan-sinaloa/land/',
+        'scrape_from_listing': True,  # HTTP plano + regex sobre HTML SSR, sin navegador
+    },
+    'buscatucasa': {
+        'class': BuscaTuCasaScraper,
+        'domain': 'catalogo.buscatucasa.mx',
+        'name': 'BuscaTuCasa',
+        'listado_url': 'https://catalogo.buscatucasa.mx/blog/property-type/terreno/',
+        'scrape_from_listing': True,  # WordPress RealHomes REST API; HTTP plano, sin navegador
     },
 }
 

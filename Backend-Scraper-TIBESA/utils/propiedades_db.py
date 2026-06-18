@@ -18,7 +18,7 @@ TABLA = "tibesa_web_propiedades"
 TABLA_LOG = "tibesa_scrapeos_log"
 
 # Portales conocidos (coincide con las claves de SCRAPERS_MAP en main.py)
-FUENTES = ["paraiso_dorado", "lamudi", "mitula", "remax_sunset_eagle", "pincali", "propiedades_com", "casasyterrenos", "century21", "depreventa", "trovit", "mazatlan_br", "icasas", "spezia", "realtor", "buscatucasa"]
+FUENTES = ["paraiso_dorado", "lamudi", "mitula", "remax_sunset_eagle", "pincali", "propiedades_com", "casasyterrenos", "century21", "depreventa", "trovit", "mazatlan_br", "icasas", "spezia", "realtor", "buscatucasa", "doorvel", "palmaz"]
 
 
 def _headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:

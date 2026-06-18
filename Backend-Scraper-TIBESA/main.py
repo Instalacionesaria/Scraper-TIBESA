@@ -39,6 +39,8 @@ from scrapers.icasas import IcasasScraper
 from scrapers.spezia import SpeziaScraper
 from scrapers.realtor import RealtorScraper
 from scrapers.buscatucasa import BuscaTuCasaScraper
+from scrapers.doorvel import DoorvelScraper
+from scrapers.palmaz import PalmazScraper
 import aiohttp
 from utils.agente_propiedades import procesar_propiedad_con_llm
 from utils.propiedades_db import upsert_propiedades, obtener_propiedades, estado_propiedades, registrar_scrapeo
@@ -166,6 +168,20 @@ SCRAPERS_MAP = {
         'name': 'BuscaTuCasa',
         'listado_url': 'https://catalogo.buscatucasa.mx/blog/property-type/terreno/',
         'scrape_from_listing': True,  # WordPress RealHomes REST API; HTTP plano, sin navegador
+    },
+    'doorvel': {
+        'class': DoorvelScraper,
+        'domain': 'www.doorvel.com',
+        'name': 'Doorvel',
+        'listado_url': 'https://www.doorvel.com/business/terrenos-en-venta-en-mazatlan-sinaloa-mexico',
+        'scrape_from_listing': True,  # API pública (properties-by-coordinates + /properties/{id}), HTTP plano
+    },
+    'palmaz': {
+        'class': PalmazScraper,
+        'domain': 'palmazinmobiliaria.com',
+        'name': 'Palmaz Inmobiliaria',
+        'listado_url': 'https://palmazinmobiliaria.com/s/terreno/ventas?id_property_type=32&business_type%5B0%5D=for_sale',
+        'scrape_from_listing': True,  # Wasi (Laravel+Vue) HTTP plano + JSON-LD detalle, sin navegador
     },
 }
 

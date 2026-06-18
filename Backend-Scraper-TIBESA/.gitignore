@@ -20,6 +20,11 @@ data/
 *.png
 *.gif
 
+# Excepción: assets estáticos del brochure (logo TIBESA, etc.) — SÍ deben versionarse
+!brochure/static/
+!brochure/static/*.png
+!brochure/static/*.jpg
+
 # IDE
 .vscode/
 .idea/

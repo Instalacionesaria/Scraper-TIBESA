@@ -167,6 +167,20 @@ const SITES = [
     totalProperties: 12,
   },
   {
+    id: 'nocnok',
+    name: 'NocNok',
+    domain: 'inmuebles.nocnok.com',
+    description: 'Portal inmobiliario (Next.js). 74 terrenos en venta en Mazatlán con datos completos (precio, m², ubicación, coordenadas, descripción, galería de fotos) vía su API JSON pública — sin anti-bot, el más rápido (~1.4 s).',
+    totalProperties: 74,
+  },
+  {
+    id: 'kwmexico',
+    name: 'KW México (Keller Williams)',
+    domain: 'kwmexico.mx',
+    description: 'Franquicia internacional (SPA Angular + API AWS). 38 terrenos en venta en Mazatlán con precio, descripción y coordenadas. Se obtiene enumerando su API pública de propiedades — sin anti-bot.',
+    totalProperties: 38,
+  },
+  {
     id: 'propiedades_com',
     name: 'Propiedades.com',
     domain: 'propiedades.com',
@@ -235,6 +249,7 @@ const SITES = [
     description: 'Portal inmobiliario nacional. Bloqueado por Cloudflare.',
     totalProperties: null,
     disabled: true,
+    blocked: true,
   },
 ]
 

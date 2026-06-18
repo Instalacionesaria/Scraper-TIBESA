@@ -41,6 +41,8 @@ from scrapers.realtor import RealtorScraper
 from scrapers.buscatucasa import BuscaTuCasaScraper
 from scrapers.doorvel import DoorvelScraper
 from scrapers.palmaz import PalmazScraper
+from scrapers.nocnok import NocNokScraper
+from scrapers.kwmexico import KWMexicoScraper
 import aiohttp
 from utils.agente_propiedades import procesar_propiedad_con_llm
 from utils.propiedades_db import upsert_propiedades, obtener_propiedades, estado_propiedades, registrar_scrapeo
@@ -182,6 +184,20 @@ SCRAPERS_MAP = {
         'name': 'Palmaz Inmobiliaria',
         'listado_url': 'https://palmazinmobiliaria.com/s/terreno/ventas?id_property_type=32&business_type%5B0%5D=for_sale',
         'scrape_from_listing': True,  # Wasi (Laravel+Vue) HTTP plano + JSON-LD detalle, sin navegador
+    },
+    'nocnok': {
+        'class': NocNokScraper,
+        'domain': 'inmuebles.nocnok.com',
+        'name': 'NocNok',
+        'listado_url': 'https://inmuebles.nocnok.com/s/terreno-en-venta/sinaloa/mazatlan',
+        'scrape_from_listing': True,  # API JSON pública /api/properties/search, HTTP plano
+    },
+    'kwmexico': {
+        'class': KWMexicoScraper,
+        'domain': 'www.kwmexico.mx',
+        'name': 'KW México (Keller Williams)',
+        'listado_url': 'https://www.kwmexico.mx/',
+        'scrape_from_listing': True,  # API pública por enumeración de IDs (filtra Mazatlán+terreno), HTTP plano
     },
 }
 

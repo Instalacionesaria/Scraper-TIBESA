@@ -5,6 +5,7 @@ import { getCredentials } from '../lib/auth'
 import { startLinkedIn, pollJobUntilDone, sendToCrm, sendToSistemaLeads } from '../lib/leadsApi'
 import { downloadCsv } from '../lib/csv'
 import LeadsTable from '../components/LeadsTable'
+import LinkedInAssistant from '../components/LinkedInAssistant'
 
 const MAX_ETIQUETA_LEN = 30
 
@@ -210,6 +211,17 @@ export default function ScraperLinkedInPage() {
             </div>
           )}
         </div>
+
+        <LinkedInAssistant
+          current={{ jobTitle, country, state, numberOfLeads }}
+          disabled={status === 'scraping'}
+          onApply={(c) => {
+            if (c.jobTitle !== undefined) setJobTitle(c.jobTitle)
+            if (c.country !== undefined) setCountry(c.country)
+            if (c.state !== undefined) setState(c.state)
+            if (c.numberOfLeads !== undefined) setNumberOfLeads(c.numberOfLeads)
+          }}
+        />
 
         {status === 'done' && leads.length > 0 && (
           <LeadsTable rows={leads} title="Leads scrapeados de LinkedIn" />

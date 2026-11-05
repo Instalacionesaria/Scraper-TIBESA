@@ -7,6 +7,7 @@ un webhook para procesar el dataset cuando termine.
 """
 
 import os
+import unicodedata
 from typing import Any, Dict, List, Optional
 
 from apify_client import ApifyClient
@@ -14,6 +15,24 @@ from apify_client import ApifyClient
 
 APIFY_TOKEN = os.getenv("APIFY_API_TOKEN")
 ACTOR_ID = "peakydev/leads-scraper-ppe"
+
+# El actor valida `personState` contra un enum cerrado con nombres en inglés
+# (estilo Apollo, p.ej. "Mexico City"). Traducimos los alias frecuentes en
+# español a su valor válido. Los nombres que ya vienen en inglés pasan directo;
+# cualquier valor no aceptado se filtra luego con el reintento sin estado.
+_STATE_ALIASES = {
+    "ciudad de mexico": "Mexico City",
+    "cdmx": "Mexico City",
+    "distrito federal": "Mexico City",
+    "df": "Mexico City",
+}
+
+
+def _normalize_state(value: str) -> str:
+    """Normaliza el estado al valor que espera el actor (enum en inglés)."""
+    v = value.strip()
+    key = unicodedata.normalize("NFKD", v).encode("ascii", "ignore").decode().lower()
+    return _STATE_ALIASES.get(key, v)
 
 
 def start_linkedin_scrape(
@@ -34,21 +53,38 @@ def start_linkedin_scrape(
         "includeEmails": True,
     }
     if person_state and person_state.strip():
-        run_input["personState"] = [person_state.strip()]
+        run_input["personState"] = [_normalize_state(person_state)]
 
     webhook_url = f"{webhook_base_url}/api/leads/webhooks/linkedin"
     print(f"🚀 Iniciando LinkedIn scrape | title={person_title} | country={person_country} | state={person_state} | total={total_results}")
     print(f"🔗 Webhook LinkedIn: {webhook_url}")
 
-    run = client.actor(ACTOR_ID).start(
-        run_input=run_input,
-        memory_mbytes=512,
-        webhooks=[{
-            "event_types": ["ACTOR.RUN.SUCCEEDED"],
-            "request_url": webhook_url,
-            "payload_template": f'{{"job_id": "{job_id}", "resource": {{{{resource}}}}}}',
-        }],
-    )
+    webhooks = [{
+        "event_types": ["ACTOR.RUN.SUCCEEDED"],
+        "request_url": webhook_url,
+        "payload_template": f'{{"job_id": "{job_id}", "resource": {{{{resource}}}}}}',
+    }]
+
+    def _start(inp: Dict[str, Any]):
+        return client.actor(ACTOR_ID).start(
+            run_input=inp,
+            memory_mbytes=512,
+            webhooks=webhooks,
+        )
+
+    try:
+        run = _start(run_input)
+    except Exception as e:
+        # Si el actor rechaza el estado (no está en su enum permitido),
+        # reintentamos sin filtro de estado para no perder toda la búsqueda,
+        # que igual filtra por país.
+        if "personState" in str(e) and "personState" in run_input:
+            print(f"⚠️ personState '{person_state}' no válido para el actor; reintentando sin estado.")
+            run_input.pop("personState", None)
+            run = _start(run_input)
+        else:
+            raise
+
     return run["id"]
 
 

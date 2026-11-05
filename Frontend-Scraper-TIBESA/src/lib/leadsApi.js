@@ -65,6 +65,12 @@ export function startLinkedIn({ jobTitle, country, state, numberOfLeads, credent
   })
 }
 
+// Chat IA que ayuda a llenar el formulario de LinkedIn.
+// messages: [{ role: 'user'|'assistant', content }], current: valores actuales del formulario.
+export function askLinkedInAssistant({ messages, current }) {
+  return post('/api/leads/linkedin/asistente', { messages, current })
+}
+
 export function startFacebookPages({ pages, credentials }) {
   return post('/api/leads/facebook/pages/start', {
     pages,

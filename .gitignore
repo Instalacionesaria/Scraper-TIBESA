@@ -55,3 +55,7 @@ pnpm-debug.log*
 
 # ---------- Carpeta de referencia (código ya integrado a Backend-Scraper-TIBESA/leads/) ----------
 Proyecto-Software-Scraper-TIBESA-System-1/
+
+# Secrets de producción
+.env.prod
+*.env.prod

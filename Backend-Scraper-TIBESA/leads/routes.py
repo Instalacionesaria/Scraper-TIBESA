@@ -12,14 +12,16 @@ Agrupa:
   - Consulta / cancelación / sync manual de jobs
 """
 
+import asyncio
 import os
 import traceback
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from apify_client import ApifyClient
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from pydantic import BaseModel
 
-from . import crm_tibesa, facebook_ads, facebook_pages, google_places, linkedin_scraper, sistema_leads
+from . import asistente_linkedin, crm_tibesa, facebook_ads, facebook_pages, google_places, linkedin_scraper, sistema_leads
 from .models import (
     ApifyWebhookPayload,
     EnviarCRMRequest,
@@ -213,6 +215,26 @@ async def start_linkedin(request: LinkedInRequest) -> Dict[str, Any]:
         "message": "El scraping de LinkedIn ha comenzado.",
         "jobId": job_id,
     }
+
+
+class AsistenteLinkedInRequest(BaseModel):
+    messages: List[asistente_linkedin.MensajeChat]
+    current: Dict[str, Any] = {}
+
+
+@router.post("/linkedin/asistente")
+async def asistente_linkedin_chat(request: AsistenteLinkedInRequest) -> Dict[str, Any]:
+    """Chat con IA que ayuda a llenar los campos del Scraper de LinkedIn (no lanza el scrapeo)."""
+    if not request.messages:
+        raise HTTPException(status_code=400, detail="Envía al menos un mensaje.")
+    try:
+        resultado = await asyncio.to_thread(asistente_linkedin.responder, request.messages, request.current)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=502, detail=f"Error del asistente IA: {e}")
+    return resultado.model_dump()
 
 
 # ============================================================================

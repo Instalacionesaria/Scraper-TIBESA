@@ -4,8 +4,10 @@ https://paraisodorado.com.mx
 """
 
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from urllib.parse import urljoin, urlparse
+
+import aiohttp
 from playwright.async_api import Page
 
 from .base_scraper import BaseScraper
@@ -17,7 +19,72 @@ class ParaisoDoradoScraper(BaseScraper):
     """
     Scraper especializado para el sitio Paraíso Dorado
     Extrae información de propiedades inmobiliarias en Mazatlán
+
+    Formato de URLs (cambió en 2026): /es/propiedades/<id>/<slug>
+    (antes: /es/propiedad/<slug>-id<id>, que hoy redirige 301 al nuevo).
+    El listado es SSR (Next.js) y pagina con enlaces ?page=N (6 por página).
     """
+
+    LISTADO_URL = 'https://paraisodorado.com.mx/es/propiedades'
+    SELECTOR_DESCRIPCION = 'div.p-6:has(h4:text-is("Descripción")) > div.mt-7'
+    SELECTOR_AMENIDADES = 'div.p-6:has(h4:text-is("Descripción")) > div.grid'
+    # /es/propiedades/330/edificio-de-2-departamentos  -> id 330
+    RE_URL_PROPIEDAD = re.compile(r'/(?:es|en)/(?:propiedades|properties)/(\d+)/[^"\'\s?#<>\\]+')
+    RE_PAGINA = re.compile(r'[?&]page=(\d+)')
+    HTTP_HEADERS = {
+        'User-Agent': ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
+                       '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'),
+        'Accept-Language': 'es-MX,es;q=0.9',
+    }
+
+    @classmethod
+    async def extraer_urls_listado(cls, listado_url: Optional[str] = None,
+                                   max_paginas: int = 50) -> List[str]:
+        """
+        Descubre todas las URLs de propiedades recorriendo el listado paginado
+        con HTTP plano (el HTML viene renderizado del servidor, no hace falta
+        Playwright). Cada página trae 6 propiedades del listado + 6 "recientes"
+        repetidas en el aside; se deduplican por ID.
+        """
+        base = (listado_url or cls.LISTADO_URL).split('?')[0]
+        parsed = urlparse(base)
+        origen = f"{parsed.scheme}://{parsed.netloc}"
+        urls: Dict[str, str] = {}
+        timeout = aiohttp.ClientTimeout(total=30)
+
+        async with aiohttp.ClientSession(headers=cls.HTTP_HEADERS, timeout=timeout) as session:
+            total_paginas = 1
+            pagina = 1
+            while pagina <= min(total_paginas, max_paginas):
+                url_pagina = base if pagina == 1 else f"{base}?page={pagina}"
+                async with session.get(url_pagina) as resp:
+                    resp.raise_for_status()
+                    html = await resp.text()
+
+                nuevas = 0
+                for m in cls.RE_URL_PROPIEDAD.finditer(html):
+                    prop_id = m.group(1)
+                    if prop_id not in urls:
+                        urls[prop_id] = urljoin(origen, m.group(0))
+                        nuevas += 1
+
+                # Total de páginas = mayor ?page=N enlazado (el paginador muestra la última)
+                paginas = [int(n) for n in cls.RE_PAGINA.findall(html)]
+                if paginas:
+                    total_paginas = max(total_paginas, max(paginas))
+                print(f"   Página {pagina}/{total_paginas}: +{nuevas} (total {len(urls)})")
+                pagina += 1
+
+        return sorted(urls.values(), key=lambda u: int(cls.RE_URL_PROPIEDAD.search(u).group(1)))
+
+    @classmethod
+    def extraer_id_de_url(cls, url: str) -> Optional[str]:
+        """ID numérico de la propiedad a partir de su URL (formato nuevo o antiguo)."""
+        m = cls.RE_URL_PROPIEDAD.search(url)
+        if m:
+            return m.group(1)
+        m = re.search(r'-id(\d+)', url)
+        return m.group(1) if m else None
     
     def __init__(self, output_dir: str = "data", headless: bool = True,
                  descargar_imagenes: bool = True):
@@ -61,6 +128,8 @@ class ParaisoDoradoScraper(BaseScraper):
                 'text=/\\$.+USD/'
             ],
             'estado': [
+                # Badge "en venta"/"en renta" junto al precio en la cabecera
+                '.gradient1 span.rounded',
                 '[class*="status"]',
                 '[class*="estado"]',
                 '.badge',
@@ -69,12 +138,16 @@ class ParaisoDoradoScraper(BaseScraper):
                 'text=/en renta/i'
             ],
             'descripcion': [
+                # Cuerpo de la descripción (debajo del h4 "Descripción" y del
+                # grid de habitaciones/baños). Evita el bloque oculto de impresión.
+                self.SELECTOR_DESCRIPCION,
                 'section:has-text("Descripción")',
                 '[class*="description"]',
                 '[class*="descripcion"]',
                 '.property-description'
             ],
             'agente_nombre': [
+                'aside article h4',
                 '[class*="agent"] h3',
                 '[class*="agent"] h4',
                 '.agent-name',
@@ -133,19 +206,44 @@ class ParaisoDoradoScraper(BaseScraper):
             precio_normalizado = self.normalizer.normalizar_precio(data['precio'])
             data['precio_normalizado'] = precio_normalizado
         
-        # Extraer ID de propiedad
-        property_id = self.normalizer.extraer_id_propiedad(data['url'])
+        # Extraer ID de propiedad (formato /es/propiedades/<id>/<slug>)
+        property_id = self.extraer_id_de_url(data['url']) or self.normalizer.extraer_id_propiedad(data['url'])
         if property_id:
             data['property_id'] = property_id
         
         return data
     
+    async def _texto_descripcion(self, page: Page) -> str:
+        """
+        Texto propio de la propiedad: descripción + grid de amenidades
+        (habitaciones, baños, garage...). NO usar page.content(): el HTML trae
+        embebido (payload RSC de Next.js) el listado de TODAS las propiedades,
+        y los regex se contaminarían con datos de otras.
+        """
+        partes = []
+        for selector in (self.SELECTOR_AMENIDADES, self.SELECTOR_DESCRIPCION):
+            try:
+                elem = await page.query_selector(selector)
+                if elem:
+                    texto = await elem.inner_text()
+                    if texto:
+                        partes.append(texto.strip())
+            except Exception:
+                continue
+        if not partes:
+            # Fallback (estructura antigua / cambió el DOM)
+            elem = await page.query_selector('section:has-text("Descripción")') \
+                or await page.query_selector('[class*="description"], [class*="descripcion"]')
+            if elem:
+                partes.append((await elem.inner_text()) or '')
+        return "\n".join(partes)
+
     async def _extraer_terreno(self, page: Page) -> Dict[str, Any]:
         """Extrae información del terreno"""
         terreno = {}
         
         try:
-            page_content = await page.content()
+            page_content = await self._texto_descripcion(page)
             
             # Patrón 1: "Terreno: 9.33has."
             terreno_match = re.search(r'Terreno:?\s*([\d,.]+)\s*(m[²2]|has?\.?|metros?)', 
@@ -190,23 +288,13 @@ class ParaisoDoradoScraper(BaseScraper):
     async def _extraer_tipo_propiedad(self, page: Page) -> str:
         """Extrae el tipo de propiedad SOLO de la descripción principal (no sidebar)"""
         try:
-            # 🎯 SOLO extraer texto de la sección de descripción principal
-            # NO de todo el HTML (para evitar falsos positivos del sidebar)
-            descripcion_elem = await page.query_selector('section:has-text("Descripción")')
-            
-            if not descripcion_elem:
-                # Fallback: buscar por selectores alternativos
-                descripcion_elem = await page.query_selector('[class*="description"], [class*="descripcion"]')
-            
+            # 🎯 Título + descripción principal (NO todo el HTML: el sidebar y
+            # el payload RSC traen otras propiedades → falsos positivos)
             descripcion_texto = ""
-            if descripcion_elem:
-                descripcion_texto = await descripcion_elem.text_content()
-            
-            # Si no hay descripción, usar título + URL
-            if not descripcion_texto:
-                titulo_elem = await page.query_selector('h1')
-                if titulo_elem:
-                    descripcion_texto = await titulo_elem.text_content()
+            titulo_elem = await page.query_selector('h1')
+            if titulo_elem:
+                descripcion_texto = (await titulo_elem.text_content() or "") + "\n"
+            descripcion_texto += await self._texto_descripcion(page)
             
             # Buscar en el HTML o breadcrumbs
             tipos = {
@@ -243,18 +331,8 @@ class ParaisoDoradoScraper(BaseScraper):
         caracteristicas = {}
         
         try:
-            # 🎯 SOLO extraer texto de la sección de descripción principal
-            descripcion_elem = await page.query_selector('section:has-text("Descripción")')
-            
-            if not descripcion_elem:
-                descripcion_elem = await page.query_selector('[class*="description"], [class*="descripcion"]')
-            
-            descripcion_texto = ""
-            if descripcion_elem:
-                descripcion_texto = await descripcion_elem.text_content()
-            else:
-                # Fallback: todo el contenido (si no hay sección específica)
-                descripcion_texto = await page.content()
+            # 🎯 SOLO texto de la descripción principal + grid de amenidades
+            descripcion_texto = await self._texto_descripcion(page)
             
             # Buscar patrones comunes SOLO en descripción
             patrones = {

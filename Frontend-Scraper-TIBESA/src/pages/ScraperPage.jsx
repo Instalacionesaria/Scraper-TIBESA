@@ -399,7 +399,9 @@ export default function ScraperPage() {
     setActiveSite(null)
   }
 
-  const isActive = status !== 'idle'
+  // "Ocupado" solo mientras corre un scrapeo. Al terminar (done) o fallar (error)
+  // los botones deben volver a habilitarse; antes se quedaban bloqueados hasta recargar.
+  const isActive = status === 'extracting' || status === 'scraping'
 
   return (
     <div>
@@ -619,8 +621,8 @@ export default function ScraperPage() {
         <ChatPanel properties={properties} fuente={dataSource === 'saved' ? activeSite : null} />
       )}
 
-      {/* Progress section */}
-      {isActive && (
+      {/* Progress section (también queda visible al terminar o fallar, con el resultado) */}
+      {status !== 'idle' && (
         <div className="mb-6">
           {/* Progress bar */}
           <div className="bg-white border border-gray-200 rounded-xl p-5">

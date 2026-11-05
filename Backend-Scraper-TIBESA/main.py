@@ -119,7 +119,7 @@ SCRAPERS_MAP = {
         'class': Century21Scraper,
         'domain': 'century21mexico.com',
         'name': 'Century 21',
-        'listado_url': 'https://century21mexico.com/v/resultados/operacion_venta/en-pais_mexico/en-estado_sinaloa/en-municipio_mazatlan',
+        'listado_url': 'https://century21mexico.com/propiedades/mx/sinaloa/mazatlan?listingContractType=Sale',
         'scrape_from_listing': True,  # HTTP plano + API ?json=true, sin navegador
     },
     'depreventa': {
@@ -175,7 +175,7 @@ SCRAPERS_MAP = {
         'class': DoorvelScraper,
         'domain': 'www.doorvel.com',
         'name': 'Doorvel',
-        'listado_url': 'https://www.doorvel.com/business/terrenos-en-venta-en-mazatlan-sinaloa-mexico',
+        'listado_url': 'https://www.doorvel.com/home/terrenos-en-venta-en-mazatlan-sinaloa-mexico',
         'scrape_from_listing': True,  # API pública (properties-by-coordinates + /properties/{id}), HTTP plano
     },
     'palmaz': {
@@ -189,7 +189,7 @@ SCRAPERS_MAP = {
         'class': NocNokScraper,
         'domain': 'inmuebles.nocnok.com',
         'name': 'NocNok',
-        'listado_url': 'https://inmuebles.nocnok.com/s/terreno-en-venta/sinaloa/mazatlan',
+        'listado_url': 'https://inmuebles.nocnok.com/categoria/terreno-en-venta/sinaloa/mazatlan',
         'scrape_from_listing': True,  # API JSON pública /api/properties/search, HTTP plano
     },
     'kwmexico': {
@@ -243,67 +243,18 @@ async def extraer_urls_del_listado(site_id: str) -> List[str]:
         return await _extraer_urls_pincali(config)
     elif site_id == 'propiedades_com':
         return await _extraer_urls_propiedades_com(config)
-    else:
+    elif site_id == 'paraiso_dorado':
         return await _extraer_urls_paraiso_dorado(config)
+    raise ValueError(f"No hay extractor de URLs para '{site_id}'")
 
 
 async def _extraer_urls_paraiso_dorado(config: dict) -> List[str]:
-    """Extractor de URLs específico para Paraíso Dorado"""
-    urls = set()
+    """Extractor de URLs de Paraíso Dorado.
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-
-        try:
-            base_url = config['listado_url']
-            await page.goto(base_url, wait_until='networkidle', timeout=60000)
-            await page.wait_for_timeout(2000)
-
-            # Detectar total de páginas
-            botones_pagina = await page.query_selector_all('nav[aria-label*="pagination"] button')
-            num_paginas = 0
-            for boton in botones_pagina:
-                texto = await boton.inner_text()
-                if texto.strip().isdigit():
-                    num_paginas = max(num_paginas, int(texto.strip()))
-            if num_paginas == 0:
-                num_paginas = 12
-
-            for num_pagina in range(1, num_paginas + 1):
-                if num_pagina > 1:
-                    selector_boton = f'nav[aria-label*="pagination"] button:has-text("{num_pagina}")'
-                    boton = await page.query_selector(selector_boton)
-                    if boton:
-                        await boton.click()
-                        await page.wait_for_timeout(2000)
-                    else:
-                        continue
-
-                # Scroll para cargar lazy content
-                await page.evaluate("""async () => {
-                    await new Promise(r => {
-                        let h = 0; const d = 100;
-                        const t = setInterval(() => {
-                            window.scrollBy(0, d); h += d;
-                            if (h >= document.body.scrollHeight) { clearInterval(t); r(); }
-                        }, 50);
-                    });
-                }""")
-                await page.wait_for_timeout(1000)
-
-                enlaces = await page.query_selector_all('a[href*="/propiedad/"]')
-                for enlace in enlaces:
-                    href = await enlace.get_attribute('href')
-                    if href and '/propiedad/' in href:
-                        if href.startswith('/'):
-                            urls.add(f"https://{config['domain']}{href}")
-                        elif href.startswith('http'):
-                            urls.add(href)
-        finally:
-            await browser.close()
-
-    return sorted(urls)
+    Desde ~2026 las fichas son /es/propiedades/<id>/<slug> y el listado se pagina con
+    ?page=N (HTML server-side), así que basta HTTP plano; ver
+    ParaisoDoradoScraper.extraer_urls_listado."""
+    return await ParaisoDoradoScraper.extraer_urls_listado(config['listado_url'])
 
 
 async def _extraer_urls_lamudi(config: dict) -> List[str]:

@@ -6,14 +6,20 @@ carga vía su API pública `api.doorvel.com`. El sitio responde HTTP 200 plano y
 API no exige autenticación para consultar, así que se scrapea con **HTTP puro
 (aiohttp)** golpeando directamente la API (sin navegador), el patrón más rápido.
 
-Flujo (2 endpoints, descubiertos del bundle JS):
+Flujo (rediseño de Doorvel, nov-2026; descubierto del bundle JS):
 1. `GET /properties-by-coordinates` con el **polígono (bounds) de Mazatlán** + place_id
-   → devuelve TODAS las propiedades del área de una sola vez (sin paginación;
-   ~1327 de todos los tipos). Cada item trae datos básicos (id, precio, ubicación,
-   lat/lon, property_type_slug).
-2. Se filtra client-side por `property_type_slug == "terrenos"` (~126 terrenos) y se
-   enriquece cada uno con `GET /properties/{id}` (título, descripción, price_mxn/usd,
-   fotos, ubicación detallada, amenidades) en paralelo.
+   → devuelve los IDs de TODAS las propiedades del área (~1600). Desde el rediseño
+   cada item trae SOLO `id, price, lat, lon` (ya no `property_type_slug`).
+2. `POST /filter-properties` con `{"ids": [...]}` (paginado por cursor, máx. 100 por
+   página) → ficha resumida de cada propiedad (título, path_url_complete, precio
+   MXN/USD, fotos, ubicación, superficie). El tipo se deduce del primer segmento de
+   `path_url_complete` ("terrenos/en-venta/mexico/sinaloa/mazatlan/427488"); se
+   quedan los terrenos en venta (~124).
+3. Detalle: `GET /properties/{id}` de la API quedó detrás de **AWS WAF** (responde
+   202 + `x-amzn-waf-action: challenge`, cuerpo vacío), así que la ficha completa
+   (descripción, coordenadas exactas, anunciante) se lee de la **página web de
+   detalle**, que la trae server-side en el payload RSC de Next.js
+   (`{"property":{...}}`, mismo esquema que la API) y en un JSON-LD RealEstateListing.
 
 place_id y bounds son constantes geográficas de Mazatlán resueltas por el server del
 propio Doorvel a partir del slug "terrenos-en-venta-en-mazatlan-sinaloa-mexico".
@@ -46,14 +52,20 @@ MAZATLAN_BOUNDS = [[[
 # Slugs de tipo que se consideran "terreno" para TIBESA
 SLUGS_TERRENO = {"terrenos", "terrenos-comerciales"}
 
-# Fichas de detalle pedidas en paralelo (HTTP plano sin anti-bot → holgado)
-CONCURRENCIA_DETALLE = 10
+# operation_type_id de Doorvel: 1 = venta, 2 = renta
+OPERACION_VENTA = 1
+
+# /filter-properties acepta hasta 100 por página
+POR_PAGINA = 100
+
+# Fichas de detalle (páginas web) pedidas en paralelo
+CONCURRENCIA_DETALLE = 8
 
 
 class DoorvelScraper:
     """Scraper de Doorvel vía su API pública (HTTP plano, sin navegador)."""
 
-    LISTADO_URL = f"{WEB}/business/terrenos-en-venta-en-mazatlan-sinaloa-mexico"
+    LISTADO_URL = f"{WEB}/home/terrenos-en-venta-en-mazatlan-sinaloa-mexico"
 
     DEFAULT_HEADERS = {
         "User-Agent": (
@@ -81,17 +93,24 @@ class DoorvelScraper:
 
     async def extraer_todas_las_propiedades(self, callback=None, max_pages: int = 0) -> List[Dict[str, Any]]:
         async with aiohttp.ClientSession(headers=self.DEFAULT_HEADERS) as session:
-            # 1) Listado por coordenadas (todas las propiedades del área de Mazatlán)
+            # 1) Listado por coordenadas: IDs (+lat/lon) de todo el área de Mazatlán
             crudas = await self._listado_por_coordenadas(session)
-            # 2) Quedarse solo con terrenos
-            terrenos = [c for c in crudas if (c.get("property_type_slug") or "") in SLUGS_TERRENO]
+            coords = {c.get("id"): c for c in crudas if c.get("id")}
+            # 2) Fichas resumidas de esos IDs (el tipo viene en path_url_complete)
+            resumidas = await self._filtrar_propiedades(session, list(coords))
+            terrenos = []
+            for r in resumidas:
+                slug_tipo = (r.get("path_url_complete") or "").strip("/").split("/")[0]
+                if slug_tipo in SLUGS_TERRENO and r.get("operation_type_id") in (None, OPERACION_VENTA):
+                    base = coords.get(r.get("id")) or {}
+                    terrenos.append({**r, "lat": base.get("lat"), "lon": base.get("lon")})
 
             # 3) Enriquecer cada terreno con su ficha de detalle (en paralelo)
             sem = asyncio.Semaphore(CONCURRENCIA_DETALLE)
 
             async def _procesar(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 async with sem:
-                    detalle = await self._detalle(session, item.get("id"))
+                    detalle = await self._detalle(session, item)
                 return self._mapear(item, detalle)
 
             propiedades = await asyncio.gather(*[_procesar(t) for t in terrenos])
@@ -126,18 +145,94 @@ class DoorvelScraper:
             return []
         return data.get("data") or []
 
-    async def _detalle(self, session: aiohttp.ClientSession, pid: Any) -> Optional[Dict[str, Any]]:
-        if not pid:
+    async def _filtrar_propiedades(self, session: aiohttp.ClientSession, ids: List[Any]) -> List[Dict[str, Any]]:
+        """POST /filter-properties con los IDs, recorriendo el cursor de paginación."""
+        if not ids:
+            return []
+        resultado: List[Dict[str, Any]] = []
+        cursor = None
+        for _ in range(200):  # tope de seguridad (~20k propiedades)
+            params = {"perPage": POR_PAGINA}
+            if cursor:
+                params["cursor"] = cursor
+            try:
+                async with session.post(f"{API}/filter-properties", params=params, json={"ids": ids},
+                                        timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status != 200:
+                        break
+                    data = await resp.json()
+            except Exception:
+                break
+            pagina = data.get("data") or []
+            resultado.extend(pagina)
+            cursor = (data.get("meta") or {}).get("next_cursor")
+            if not cursor or not pagina:
+                break
+        return resultado
+
+    async def _detalle(self, session: aiohttp.ClientSession, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Ficha completa leída de la página web de detalle (la API /properties/{id}
+        está detrás de AWS WAF). Devuelve el objeto `property` embebido por Next.js."""
+        path = (item.get("path_url_complete") or "").strip("/")
+        if not path:
             return None
+        url = f"{WEB}/business/propiedades/{path}"
+        html = None
+        for intento in range(2):
+            try:
+                async with session.get(url, headers={"Accept": "text/html,application/xhtml+xml"},
+                                       timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        html = await resp.text()
+                        break
+                    if resp.status in (404, 410):
+                        return None
+            except Exception:
+                pass
+            await asyncio.sleep(1 + intento)
+        if not html:
+            return None
+        return self._extraer_property_html(html)
+
+    @staticmethod
+    def _extraer_property_html(html: str) -> Optional[Dict[str, Any]]:
+        # Payload RSC de Next.js: self.__next_f.push([1,"..."]) concatenados
         try:
-            async with session.get(f"{API}/properties/{pid}",
-                                   timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
+            trozos = re.findall(r'self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)', html)
+            payload = "".join(json.loads(t) for t in trozos)
         except Exception:
-            return None
-        return data.get("data") or None
+            payload = ""
+        prop: Dict[str, Any] = {}
+        i = payload.find('{"property":{')
+        if i >= 0:
+            try:
+                prop = json.JSONDecoder().raw_decode(payload, i)[0].get("property") or {}
+            except Exception:
+                prop = {}
+
+        # La descripción suele venir como referencia RSC ("$4b"); el texto real está
+        # en el JSON-LD RealEstateListing (o en la fila "4b:T<len>," del payload).
+        desc = prop.get("description")
+        if not isinstance(desc, str) or desc.startswith("$"):
+            desc = None
+            for bloque in re.findall(r'<script type="application/ld\+json"[^>]*>(.*?)</script>', html, re.S):
+                try:
+                    ld = json.loads(bloque)
+                except Exception:
+                    continue
+                if isinstance(ld, dict) and ld.get("@type") == "RealEstateListing":
+                    desc = ld.get("description")
+                    if not prop.get("title"):
+                        prop["title"] = ld.get("name")
+                    break
+            if not desc and isinstance(prop.get("description"), str):
+                ref = prop["description"][1:]
+                m = re.search(r'(?:^|[\n\]}])' + re.escape(ref) + r':T([0-9a-f]+),', payload)
+                if m:
+                    n = int(m.group(1), 16)
+                    desc = payload[m.end():].encode("utf-8")[:n].decode("utf-8", "ignore")
+            prop["description"] = desc
+        return prop or None
 
     # ---------- Mapeo ----------
 
@@ -146,7 +241,8 @@ class DoorvelScraper:
             pid = item.get("id") or (detalle or {}).get("id")
             if not pid:
                 return None
-            d = detalle or {}
+            # Si la página de detalle falla, se usa la ficha resumida de /filter-properties
+            d = detalle or item
 
             # Precio: MXN principal + USD aparte
             precio = None
@@ -189,8 +285,12 @@ class DoorvelScraper:
                 caracteristicas["superficie_m2"] = sup
 
             amen = d.get("amenities")
-            if isinstance(amen, dict) and amen:
-                caracteristicas["amenidades"] = list(amen.values())
+            if isinstance(amen, dict):
+                amen = list(amen.values())
+            if isinstance(amen, list) and amen:
+                caracteristicas["amenidades"] = [
+                    (a.get("name") or a.get("amenity") or str(a)) if isinstance(a, dict) else a for a in amen
+                ]
 
             # Imágenes
             fotos = d.get("photos") or []
@@ -206,7 +306,8 @@ class DoorvelScraper:
             agente = {}
             ag = d.get("agent") or d.get("team_owner") or {}
             if isinstance(ag, dict) and ag:
-                nombre = ag.get("name") or ag.get("full_name") or ag.get("business_name")
+                nombre = (ag.get("name") or ag.get("hb_name") or ag.get("full_name")
+                          or ag.get("business_name"))
                 if nombre:
                     agente["nombre"] = nombre
 

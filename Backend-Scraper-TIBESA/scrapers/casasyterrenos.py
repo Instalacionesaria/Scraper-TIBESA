@@ -16,6 +16,7 @@ así que no hay paginación para esta búsqueda.
 """
 
 import asyncio
+import html as html_lib
 import json
 import re
 from pathlib import Path
@@ -29,6 +30,8 @@ BASE = "https://www.casasyterrenos.com"
 _NEXT_DATA_RE = re.compile(
     r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S
 )
+# App Router de Next.js: los datos viajan en <script>self.__next_f.push([1,"..."])</script>
+_NEXT_F_RE = re.compile(r'self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)', re.S)
 
 # Cuántas fichas de detalle se piden en paralelo (HTTP plano, sin anti-bot → holgado)
 CONCURRENCIA_DETALLE = 8
@@ -103,12 +106,23 @@ class CasasYTerrenosScraper:
         async with session.get(self.LISTADO_URL, timeout=aiohttp.ClientTimeout(total=30)) as resp:
             html = await resp.text()
         data = self._parse_next_data(html)
-        if not data:
-            return []
+        if data:  # formato viejo (Pages Router)
+            try:
+                return data["props"]["pageProps"]["initialState"]["propertyData"]["properties"]
+            except (KeyError, TypeError):
+                return []
+
+        # Formato nuevo (App Router, desde ~jul-2026): el mismo `initialState`
+        # viaja dentro del payload RSC de `self.__next_f.push(...)`.
+        estado = self._rsc_objeto(self._rsc_payload(html), "initialState")
         try:
-            return data["props"]["pageProps"]["initialState"]["propertyData"]["properties"]
+            props = estado["propertyData"]["properties"]
         except (KeyError, TypeError):
+            props = None
+        if not isinstance(props, list):
+            print("⚠️ Casas y Terrenos: no se encontró el listado en la página (¿cambió el sitio otra vez?)")
             return []
+        return props
 
     def _mapear_propiedad(self, raw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Mapea una propiedad cruda del listado al formato común de los scrapers.
@@ -224,16 +238,22 @@ class CasasYTerrenosScraper:
         except Exception:
             return None
 
+        prop = None
+        payload = ""
         data = self._parse_next_data(html)
-        if not data:
-            return None
-        try:
-            prop = data["props"]["pageProps"]["property"]
-        except (KeyError, TypeError):
+        if data:  # formato viejo (Pages Router)
+            try:
+                prop = data["props"]["pageProps"]["property"]
+            except (KeyError, TypeError):
+                prop = None
+        else:  # formato nuevo (App Router, desde ~jul-2026)
+            payload = self._rsc_payload(html)
+            prop = self._rsc_objeto(payload, "property")
+        if not isinstance(prop, dict):
             return None
 
         out: Dict[str, Any] = {}
-        desc = prop.get("description")
+        desc = self._rsc_resolver(payload, prop.get("description"))
         if isinstance(desc, str) and desc.strip():
             out["descripcion"] = desc.strip()
 
@@ -248,6 +268,11 @@ class CasasYTerrenosScraper:
                         amenidades.append(item.get("name") or item.get("label") or "")
                     elif isinstance(item, str):
                         amenidades.append(item)
+            elif campo == "generalAmenities" and isinstance(valor, dict):
+                # Formato nuevo: {"Amenidades": ["Alberca"], "Seguridad": ["Vigilante"], ...}
+                for lista in valor.values():
+                    if isinstance(lista, list):
+                        amenidades.extend(x for x in lista if isinstance(x, str))
         amenidades = [a for a in amenidades if a]
         if amenidades:
             caracteristicas["amenidades"] = amenidades
@@ -266,6 +291,58 @@ class CasasYTerrenosScraper:
             return json.loads(m.group(1))
         except Exception:
             return None
+
+    @staticmethod
+    def _rsc_payload(html: str) -> str:
+        """Une los fragmentos `self.__next_f.push([1,"..."])` del App Router de Next.js
+        en un solo texto (cada fragmento es un literal de string JS/JSON)."""
+        partes = []
+        for literal in _NEXT_F_RE.findall(html or ""):
+            try:
+                partes.append(json.loads(literal))
+            except Exception:
+                continue
+        return "".join(partes)
+
+    @staticmethod
+    def _rsc_objeto(payload: str, clave: str) -> Optional[Any]:
+        """Devuelve el valor JSON de la primera aparición de `"clave":{...}` en el payload."""
+        marca = f'"{clave}":'
+        decoder = json.JSONDecoder()
+        inicio = 0
+        while True:
+            i = payload.find(marca, inicio)
+            if i < 0:
+                return None
+            j = i + len(marca)
+            if payload[j:j + 1] in ("{", "["):
+                try:
+                    valor, _ = decoder.raw_decode(payload, j)
+                    return valor
+                except ValueError:
+                    pass
+            inicio = j
+
+    @staticmethod
+    def _rsc_resolver(payload: str, valor: Any) -> Any:
+        """Resuelve referencias RSC tipo "$34" a su fila de texto `34:T<hexlen>,<texto>`.
+        Si no es una referencia, devuelve el valor tal cual."""
+        if not (payload and isinstance(valor, str) and re.fullmatch(r"\$[0-9a-f]+", valor)):
+            return valor
+        fila = valor[1:]
+        # Las filas de texto (`T`) pueden ir pegadas al final de la fila anterior,
+        # sin salto de línea, así que no se exige "\n" antes del id.
+        m = re.search(rf"(?<![0-9a-zA-Z]){fila}:T([0-9a-f]+),", payload)
+        if not m:
+            return None
+        largo_bytes = int(m.group(1), 16)
+        resto = payload[m.end():].encode("utf-8")
+        texto = resto[:largo_bytes].decode("utf-8", errors="ignore")
+        # La descripción viene en HTML (editor Trix) → texto plano.
+        texto = re.sub(r"<figure.*?</figure>", " ", texto, flags=re.S)
+        texto = re.sub(r"<br\s*/?>|</(?:div|p|li|h\d)>", "\n", texto)
+        texto = html_lib.unescape(re.sub(r"<[^>]+>", "", texto)).replace("\xa0", " ")
+        return re.sub(r"\n\s*\n+", "\n\n", re.sub(r"[ \t]+", " ", texto)).strip()
 
     @staticmethod
     def _normalizar_tipo(tipo: Optional[str]) -> Optional[str]:

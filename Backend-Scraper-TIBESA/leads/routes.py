@@ -21,7 +21,8 @@ from apify_client import ApifyClient
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel
 
-from . import asistente_linkedin, crm_tibesa, facebook_ads, facebook_pages, google_places, linkedin_scraper, sistema_leads
+from . import asistente_busqueda_leads, asistente_linkedin, crm_tibesa, facebook_ads, facebook_pages, google_places, linkedin_scraper, sistema_leads
+from .asistente_ia import MensajeChat
 from .models import (
     ApifyWebhookPayload,
     EnviarCRMRequest,
@@ -217,24 +218,35 @@ async def start_linkedin(request: LinkedInRequest) -> Dict[str, Any]:
     }
 
 
-class AsistenteLinkedInRequest(BaseModel):
-    messages: List[asistente_linkedin.MensajeChat]
+class AsistenteRequest(BaseModel):
+    messages: List[MensajeChat]
     current: Dict[str, Any] = {}
 
 
-@router.post("/linkedin/asistente")
-async def asistente_linkedin_chat(request: AsistenteLinkedInRequest) -> Dict[str, Any]:
-    """Chat con IA que ayuda a llenar los campos del Scraper de LinkedIn (no lanza el scrapeo)."""
+async def _correr_asistente(responder, request: AsistenteRequest) -> Dict[str, Any]:
+    """Ejecuta un asistente IA de formulario y traduce los errores a HTTP."""
     if not request.messages:
         raise HTTPException(status_code=400, detail="Envía al menos un mensaje.")
     try:
-        resultado = await asyncio.to_thread(asistente_linkedin.responder, request.messages, request.current)
+        resultado = await asyncio.to_thread(responder, request.messages, request.current)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=502, detail=f"Error del asistente IA: {e}")
     return resultado.model_dump()
+
+
+@router.post("/linkedin/asistente")
+async def asistente_linkedin_chat(request: AsistenteRequest) -> Dict[str, Any]:
+    """Chat con IA que ayuda a llenar los campos del Scraper de LinkedIn (no lanza el scrapeo)."""
+    return await _correr_asistente(asistente_linkedin.responder, request)
+
+
+@router.post("/google-places/asistente")
+async def asistente_busqueda_leads_chat(request: AsistenteRequest) -> Dict[str, Any]:
+    """Chat con IA que ayuda a llenar los campos de Búsqueda de Leads (no lanza el scrapeo)."""
+    return await _correr_asistente(asistente_busqueda_leads.responder, request)
 
 
 # ============================================================================
@@ -539,8 +551,12 @@ async def _process_linkedin_results(job_id: str, dataset_id: str) -> None:
             update_job_results(job_id, "FAILED", error_message=str(err))
             return
 
-        leads = linkedin_scraper.build_final_leads(items)
+        lead_items, aviso = linkedin_scraper.split_leads_y_avisos(items)
+        leads = linkedin_scraper.build_final_leads(lead_items)
         output = {"data": leads, "results_count": len(leads)}
+        if aviso:
+            output["aviso"] = aviso
+            print(f"ℹ️ Aviso del actor: {aviso}")
         update_job_results(job_id, "COMPLETED", results=output)
         print(f"🏁 LinkedIn job {job_id} completado. {len(leads)} leads.")
     except Exception as e:

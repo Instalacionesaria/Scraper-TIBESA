@@ -71,6 +71,11 @@ export function askLinkedInAssistant({ messages, current }) {
   return post('/api/leads/linkedin/asistente', { messages, current })
 }
 
+// Chat IA que ayuda a llenar el formulario de Búsqueda de Leads (Google Maps).
+export function askBusquedaLeadsAssistant({ messages, current }) {
+  return post('/api/leads/google-places/asistente', { messages, current })
+}
+
 export function startFacebookPages({ pages, credentials }) {
   return post('/api/leads/facebook/pages/start', {
     pages,

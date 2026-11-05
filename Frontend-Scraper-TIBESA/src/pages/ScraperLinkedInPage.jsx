@@ -21,6 +21,7 @@ export default function ScraperLinkedInPage() {
   const [resultsCount, setResultsCount] = useState(0)
   const [leads, setLeads] = useState([])
   const [errorMsg, setErrorMsg] = useState('')
+  const [aviso, setAviso] = useState('')
 
   const [enviandoCRM, setEnviandoCRM] = useState(false)
   const [crmResult, setCrmResult] = useState(null)
@@ -39,6 +40,7 @@ export default function ScraperLinkedInPage() {
     if (!canStart) return
     setStatus('scraping')
     setErrorMsg('')
+    setAviso('')
     setResultsCount(0)
     setLeads([])
     setCrmResult(null)
@@ -58,6 +60,7 @@ export default function ScraperLinkedInPage() {
       if (job.status === 'COMPLETED') {
         setResultsCount(job.results_count || 0)
         setLeads(job.results?.data || [])
+        setAviso(job.results?.aviso || '')
         setStatus('done')
       } else {
         setErrorMsg(`El trabajo terminó con estado: ${job.status}`)
@@ -203,6 +206,12 @@ export default function ScraperLinkedInPage() {
           {status === 'done' && (
             <div className="mt-4 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
               Scrapeo completado. <strong>{resultsCount}</strong> leads encontrados. Job ID: <code className="text-xs">{jobId}</code>
+            </div>
+          )}
+          {status === 'done' && aviso && (
+            <div className="mt-3 flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
+              <span>{aviso}</span>
             </div>
           )}
           {status === 'error' && (

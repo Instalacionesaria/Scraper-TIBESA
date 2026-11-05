@@ -8,16 +8,13 @@ de Apify (nombres en inglés). El asistente NUNCA lanza el scrapeo: solo llena
 los campos; el usuario revisa y da clic en "Iniciar Scraping".
 """
 
-import os
-from typing import List, Literal, Optional
+from typing import List, Optional
 
-from langchain.chat_models import init_chat_model
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from .asistente_ia import MensajeChat, formatear_valores, invocar_estructurado
 
-DEFAULT_MODEL = "gpt-4.1"
-MAX_HISTORIAL = 20  # últimos mensajes que se mandan al LLM
+
 MAX_LEADS = 30000
 
 SYSTEM_PROMPT = """Eres el asistente del "Scraper de LinkedIn" de TIBESA Bienes Raíces (Mazatlán, México).
@@ -45,16 +42,23 @@ REGLAS:
 - `listo` = true cuando job_title, country y number_of_leads queden completos.
   Entonces dile que revise los campos y presione el botón azul "Iniciar Scraping".
 - Tú NO inicias el scrapeo ni prometes resultados; no inventes cantidades de leads disponibles.
+- Solo salen personas con email verificado, así que un cargo muy específico + un estado puede dar pocos
+  leads (p.ej. ~16). Para más volumen sugiere cargos más generales o quitar el estado.
+- El buscador NO repite leads: repetir exactamente la misma búsqueda (mismo cargo, país y estado) da 0 nuevos.
+  Si el usuario quiere "más" de lo mismo, sugiere variar el cargo (p.ej. "Civil Engineer" → "Structural Engineer",
+  "Project Engineer", "Construction Manager") o el estado.
 - Si preguntan algo fuera de este formulario, redirige amablemente a la búsqueda de leads.
 
 VALORES ACTUALES DEL FORMULARIO:
 {valores_actuales}
 """
 
-
-class MensajeChat(BaseModel):
-    role: Literal["user", "assistant"]
-    content: str
+ETIQUETAS = {
+    "jobTitle": "job_title",
+    "country": "country",
+    "state": "state",
+    "numberOfLeads": "number_of_leads",
+}
 
 
 class CamposLinkedIn(BaseModel):
@@ -70,35 +74,10 @@ class RespuestaAsistente(BaseModel):
     listo: bool = Field(..., description="True si los campos obligatorios ya están completos")
 
 
-def _formatear_valores(actuales: dict) -> str:
-    etiquetas = {
-        "jobTitle": "job_title",
-        "country": "country",
-        "state": "state",
-        "numberOfLeads": "number_of_leads",
-    }
-    lineas = []
-    for clave, nombre in etiquetas.items():
-        valor = actuales.get(clave)
-        lineas.append(f"- {nombre}: {valor if valor not in (None, '') else '(vacío)'}")
-    return "\n".join(lineas)
-
-
 def responder(mensajes: List[MensajeChat], valores_actuales: dict) -> RespuestaAsistente:
     """Llama al LLM con el historial y devuelve respuesta + campos sugeridos."""
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY no configurada en el backend.")
-
-    model_name = os.getenv("LINKEDIN_ASISTENTE_MODEL", DEFAULT_MODEL)
-    llm = init_chat_model(model_name, model_provider="openai", api_key=api_key, temperature=0.2)
-    llm_estructurado = llm.with_structured_output(RespuestaAsistente)
-
-    historial = [SystemMessage(content=SYSTEM_PROMPT.format(valores_actuales=_formatear_valores(valores_actuales)))]
-    for m in mensajes[-MAX_HISTORIAL:]:
-        historial.append(HumanMessage(content=m.content) if m.role == "user" else AIMessage(content=m.content))
-
-    resultado: RespuestaAsistente = llm_estructurado.invoke(historial)
+    prompt = SYSTEM_PROMPT.format(valores_actuales=formatear_valores(valores_actuales, ETIQUETAS))
+    resultado = invocar_estructurado(prompt, RespuestaAsistente, mensajes)
 
     # Saneamos lo que vuelve del LLM antes de mandarlo al formulario.
     c = resultado.campos

@@ -5,6 +5,7 @@ import { getCredentials } from '../lib/auth'
 import { startGooglePlaces, pollJobUntilDone, sendToCrm, sendToSistemaLeads } from '../lib/leadsApi'
 import { downloadCsv } from '../lib/csv'
 import LeadsTable from '../components/LeadsTable'
+import BusquedaLeadsAssistant from '../components/BusquedaLeadsAssistant'
 
 const MAX_ETIQUETA_LEN = 30
 
@@ -187,6 +188,16 @@ export default function BusquedaLeadsPage() {
             )}
           </div>
         </div>
+
+        <BusquedaLeadsAssistant
+          current={{ tipoNegocio, localizacion, enriquecer }}
+          disabled={status === 'scraping'}
+          onApply={(c) => {
+            if (c.tipoNegocio !== undefined) setTipoNegocio(c.tipoNegocio)
+            if (c.localizacion !== undefined) setLocalizacion(c.localizacion)
+            if (c.enriquecer !== undefined) setEnriquecer(c.enriquecer)
+          }}
+        />
 
         {status === 'done' && leads.length > 0 && (
           <LeadsTable rows={leads} title="Leads scrapeados" />

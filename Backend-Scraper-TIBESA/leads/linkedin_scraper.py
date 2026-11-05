@@ -105,6 +105,44 @@ def _pick(item: Dict[str, Any], *keys: str) -> Any:
     return None
 
 
+_LEAD_KEYS = ("email", "lastName", "last_name", "title", "linkedinUrl", "linkedin_url", "companyName", "company_name")
+
+
+def _is_notice(item: Dict[str, Any]) -> bool:
+    """El actor mete avisos en el dataset como filas falsas (texto en `firstName`,
+    sin email, cargo ni apellido). No son leads."""
+    return not any(item.get(k) for k in _LEAD_KEYS)
+
+
+def _traducir_aviso(texto: str) -> str:
+    """Traduce los avisos del actor a un mensaje claro en español para el usuario."""
+    t = texto.lower()
+    if "exhausted all leads" in t:
+        return ("Ya se descargaron todos los leads disponibles para esta misma búsqueda en una corrida anterior. "
+                "El buscador no repite leads: cambia el cargo, el estado o el país para obtener leads nuevos.")
+    if "no leads found" in t:
+        return ("No hay leads con email para esta combinación de cargo, país y estado. "
+                "Prueba un cargo más general (en inglés), otro estado, o deja el estado vacío.")
+    if "delivered all" in t:
+        return ("Se entregaron todos los leads disponibles para estos filtros "
+                "(había menos de los que pediste).")
+    return texto
+
+
+def split_leads_y_avisos(dataset_items: List[Dict[str, Any]]):
+    """Separa los leads reales de los avisos del actor. Devuelve (leads_items, aviso|None).
+    Se ignora el aviso genérico de 'Leave Start Page empty' (es informativo, siempre sale)."""
+    leads_items, avisos = [], []
+    for item in dataset_items:
+        if _is_notice(item):
+            texto = (item.get("firstName") or item.get("first_name") or "").strip()
+            if texto and "leave start page empty" not in texto.lower():
+                avisos.append(_traducir_aviso(texto))
+        else:
+            leads_items.append(item)
+    return leads_items, (avisos[-1] if avisos else None)
+
+
 def build_final_leads(dataset_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Mapea los items del actor a un schema homogéneo (camelCase) compatible con
     el envío al CRM de TIBESA y al Sistema de Leads."""

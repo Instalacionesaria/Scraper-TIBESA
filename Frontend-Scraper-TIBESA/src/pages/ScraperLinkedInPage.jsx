@@ -26,6 +26,7 @@ export default function ScraperLinkedInPage() {
   const [enviandoCRM, setEnviandoCRM] = useState(false)
   const [crmResult, setCrmResult] = useState(null)
   const [enviandoSL, setEnviandoSL] = useState(false)
+  const [slProgreso, setSlProgreso] = useState(null) // { leads_sent, leads_failed, total }
   const [slResult, setSlResult] = useState(null)
 
   const credentials = getCredentials()
@@ -84,12 +85,13 @@ export default function ScraperLinkedInPage() {
     setEnviandoSL(true)
     setSlResult(null)
     try {
-      const res = await sendToSistemaLeads({ jobId, credentials })
+      const res = await sendToSistemaLeads({ jobId, credentials, onProgress: setSlProgreso })
       setSlResult(res)
     } catch (e) {
       setSlResult({ status: 'error', message: e.message })
     } finally {
       setEnviandoSL(false)
+      setSlProgreso(null)
     }
   }
 
@@ -296,16 +298,26 @@ export default function ScraperLinkedInPage() {
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-indigo-400 hover:bg-indigo-500 disabled:bg-white/10 disabled:text-white/40 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             {enviandoSL ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /> Enviando al Sistema...</>
+              <><Loader2 className="w-4 h-4 animate-spin" /> {slProgreso?.total
+                ? `Enviando ${(slProgreso.leads_sent || 0) + (slProgreso.leads_failed || 0)} de ${slProgreso.total}...`
+                : 'Enviando al Sistema...'}</>
             ) : (
               <><Share2 className="w-4 h-4" /> Enviar a Sistema de Leads</>
             )}
           </button>
 
+          {enviandoSL && (
+            <div className="text-xs rounded-lg px-3 py-2 border text-indigo-200 bg-indigo-500/10 border-indigo-400/30">
+              El envío puede tardar unos minutos (el sistema analiza cada lead con IA). No cierre esta página.
+            </div>
+          )}
+
           {slResult && (
             <div className={`text-xs rounded-lg px-3 py-2 border ${
               slResult.status === 'success'
                 ? 'text-indigo-200 bg-indigo-500/10 border-indigo-400/30'
+                : slResult.status === 'ya_enviado'
+                ? 'text-amber-200 bg-amber-500/10 border-amber-400/30'
                 : 'text-red-200 bg-red-500/10 border-red-500/30'
             }`}>
               {slResult.message}

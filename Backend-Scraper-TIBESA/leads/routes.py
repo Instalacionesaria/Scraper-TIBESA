@@ -307,9 +307,34 @@ async def send_to_crm(request: EnviarCRMRequest) -> Dict[str, Any]:
 # SISTEMA DE LEADS (webhook n8n)
 # ============================================================================
 
+# Envíos al Sistema de Leads en curso o recién terminados, por job_id.
+# En memoria: el backend corre en un solo proceso (uvicorn sin --workers). Si se
+# reinicia, el estado final se recupera de results_data en Supabase.
+_ENVIOS_SL: Dict[str, Dict[str, Any]] = {}
+_TAREAS_SL: set = set()  # referencias para que el GC no corte las tareas
+
+
+def _fecha_legible(iso: str) -> str:
+    """'2026-11-06T20:08:00.009' (UTC) → '06/11/2026 a las 13:08' (hora de Mazatlán)."""
+    import datetime
+    from zoneinfo import ZoneInfo
+    try:
+        dt = datetime.datetime.fromisoformat(iso).replace(tzinfo=datetime.timezone.utc)
+        return dt.astimezone(ZoneInfo("America/Mazatlan")).strftime("%d/%m/%Y a las %H:%M")
+    except Exception:
+        return (iso or "")[:16].replace("T", " ")
+
+
 @router.post("/sistema-leads/send")
 async def send_to_sistema_leads(request: EnviarSistemaLeadsRequest) -> Dict[str, Any]:
-    """Envía los leads de un job completado al Sistema de Leads (n8n)."""
+    """Inicia en segundo plano el envío de los leads de un job al Sistema de Leads.
+
+    El webhook analiza cada prospecto con IA y tarda varios segundos por lead:
+    100 leads eran 12-17 min en una sola petición, y el navegador cortaba con
+    "Failed to fetch" (aunque el envío terminaba en el servidor). Ahora responde
+    al instante con status="enviando" y el frontend consulta el progreso en
+    GET /sistema-leads/status/{job_id}.
+    """
     user = get_user_by_email(request.correo_electronico)
     job = get_job(request.job_id)
 
@@ -321,28 +346,87 @@ async def send_to_sistema_leads(request: EnviarSistemaLeadsRequest) -> Dict[str,
             detail=f"El trabajo no está completado. Estado: {job.get('status')}",
         )
 
+    job_id = request.job_id
+    en_curso = _ENVIOS_SL.get(job_id)
+    if en_curso and en_curso.get("status") == "enviando":
+        return en_curso  # ya se está enviando: no duplicar
+
     results_data = job.get("results_data") or {}
+    if results_data.get("enviado_a_sistema_leads"):
+        return {
+            "status": "ya_enviado",
+            "message": (
+                "Estos leads ya se habían enviado al Sistema de Leads el "
+                f"{_fecha_legible(results_data.get('sistema_leads_fecha_envio'))}. "
+                "No se volvieron a enviar para no duplicarlos."
+            ),
+            "job_id": job_id,
+        }
+
     leads = results_data.get("data") or []
     if not leads:
         raise HTTPException(status_code=400, detail="El trabajo no tiene resultados para enviar.")
 
-    print(f"📊 {len(leads)} leads a enviar al Sistema de Leads")
-    result = sistema_leads.send_leads_to_sistema(leads)
+    estado: Dict[str, Any] = {
+        "status": "enviando",
+        "message": f"Enviando {len(leads)} leads al Sistema de Leads...",
+        "total": len(leads),
+        "leads_sent": 0,
+        "leads_failed": 0,
+        "job_id": job_id,
+    }
+    _ENVIOS_SL[job_id] = estado
+    print(f"📊 {len(leads)} leads a enviar al Sistema de Leads (job {job_id})")
 
-    if result.get("success"):
-        results_data.update({
-            "enviado_a_sistema_leads": True,
-            "sistema_leads_fecha_envio": __import__("datetime").datetime.utcnow().isoformat(),
-        })
-        patch_job_results_data(request.job_id, results_data)
+    def _progreso(enviados: int, fallidos: int) -> None:
+        estado["leads_sent"] = enviados
+        estado["leads_failed"] = fallidos
 
+    async def _enviar() -> None:
+        try:
+            result = await asyncio.to_thread(sistema_leads.send_leads_to_sistema, leads, _progreso)
+            if result.get("success"):
+                results_data.update({
+                    "enviado_a_sistema_leads": True,
+                    "sistema_leads_fecha_envio": __import__("datetime").datetime.utcnow().isoformat(),
+                })
+                await asyncio.to_thread(patch_job_results_data, job_id, results_data)
+            estado.update({
+                "status": "success" if result["success"] else "error",
+                "message": result["message"],
+                "leads_sent": result["leads_sent"],
+                "leads_failed": result.get("leads_failed", 0),
+                "errors": result.get("errors", []),
+            })
+        except Exception as e:
+            traceback.print_exc()
+            estado.update({"status": "error", "message": f"Error enviando al Sistema de Leads: {e}"})
+
+    tarea = asyncio.create_task(_enviar())
+    _TAREAS_SL.add(tarea)
+    tarea.add_done_callback(_TAREAS_SL.discard)
+    return estado
+
+
+@router.get("/sistema-leads/status/{job_id}")
+async def sistema_leads_status(job_id: str) -> Dict[str, Any]:
+    """Progreso del envío al Sistema de Leads de un job."""
+    estado = _ENVIOS_SL.get(job_id)
+    if estado:
+        return estado
+    # Sin estado en memoria (p. ej. el backend se reinició): mirar Supabase.
+    job = get_job(job_id, select="results_data")
+    results_data = job.get("results_data") or {}
+    if results_data.get("enviado_a_sistema_leads"):
+        return {
+            "status": "success",
+            "message": "Los leads se enviaron al Sistema de Leads.",
+            "job_id": job_id,
+        }
     return {
-        "status": "success" if result["success"] else "error",
-        "message": result["message"],
-        "leads_sent": result["leads_sent"],
-        "leads_failed": result.get("leads_failed", 0),
-        "job_id": request.job_id,
-        "errors": result.get("errors", []),
+        "status": "error",
+        "message": "El envío se interrumpió (el servidor se reinició). Vuelve a intentarlo.",
+        "job_id": job_id,
     }
 
 

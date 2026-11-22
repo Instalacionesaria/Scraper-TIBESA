@@ -93,11 +93,34 @@ export function sendToCrm({ jobId, etiqueta, credentials }) {
   })
 }
 
-export function sendToSistemaLeads({ jobId, credentials }) {
-  return post('/api/leads/sistema-leads/send', {
+// Envía los leads al Sistema de Leads. El backend lo hace en segundo plano (el
+// receptor analiza cada lead con IA y 100 leads tardan varios minutos), así que
+// aquí se inicia el envío y se consulta el progreso hasta que termine.
+// onProgress({ leads_sent, leads_failed, total }) se llama en cada consulta.
+// Devuelve el resultado final: { status: 'success'|'error'|'ya_enviado', message, leads_sent, ... }
+export async function sendToSistemaLeads({ jobId, credentials, onProgress }) {
+  let estado = await post('/api/leads/sistema-leads/send', {
     job_id: jobId,
     correo_electronico: credentials.correo_electronico,
   })
+  const inicio = Date.now()
+  let fallosSeguidos = 0
+  while (estado.status === 'enviando') {
+    if (onProgress) onProgress(estado)
+    if (Date.now() - inicio > 45 * 60 * 1000) {
+      throw new Error('El envío está tardando demasiado. Revisa más tarde en el Sistema de Leads si llegaron.')
+    }
+    await new Promise((r) => setTimeout(r, 3000))
+    try {
+      estado = await get(`/api/leads/sistema-leads/status/${jobId}`)
+      fallosSeguidos = 0
+    } catch (e) {
+      // Un corte de red momentáneo no debe dar el envío por fallido.
+      fallosSeguidos += 1
+      if (fallosSeguidos >= 5) throw e
+    }
+  }
+  return estado
 }
 
 export function getJob(jobId) {

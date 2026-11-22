@@ -379,9 +379,20 @@ async def _extraer_urls_pincali(config: dict) -> List[str]:
                 page_url = base_url if num_pagina == 1 else f"{base_url}?page={num_pagina}"
                 print(f"📄 Pincali - Página {num_pagina}: {page_url}")
 
-                await page.goto(page_url, wait_until='networkidle', timeout=60000)
+                resp = await page.goto(page_url, wait_until='networkidle', timeout=60000)
                 # El reto del WAF puede tardar; esperar a que aparezcan las fichas
                 await page.wait_for_timeout(4000)
+
+                # Desde nov-2026 el WAF ya no pone un reto invisible sino un CAPTCHA
+                # ("Confirme que es humano", HTTP 405/202), incluso a Chrome real.
+                titulo = (await page.title() or '').lower()
+                captcha = await page.query_selector('#captcha-container')
+                if captcha or 'humano' in titulo or (resp is not None and resp.status in HTTP_BLOQUEO):
+                    status = resp.status if resp is not None else 405
+                    if num_pagina == 1:
+                        raise SitioBloqueadoError(config['name'], status)
+                    print(f"   → CAPTCHA/bloqueo en la página {num_pagina}, se corta la paginación")
+                    break
 
                 enlaces = await page.query_selector_all('a[href*="/inmueble/"]')
                 nuevas = 0

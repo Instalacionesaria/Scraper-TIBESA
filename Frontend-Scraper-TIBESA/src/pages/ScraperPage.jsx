@@ -91,6 +91,7 @@ const SITES = [
     domain: 'pincali.com',
     description: 'Portal inmobiliario nacional. ~240 terrenos en venta en Mazatlán, con datos estructurados (precio, superficie, ubicación).',
     totalProperties: 240,
+    bloqueado: true, // CAPTCHA de AWS WAF desde nov-2026
   },
   {
     id: 'mazatlan_br',

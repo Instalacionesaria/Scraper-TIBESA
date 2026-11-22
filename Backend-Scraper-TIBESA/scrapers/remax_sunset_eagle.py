@@ -2,10 +2,16 @@
 Scraper específico para RE/MAX Sunset Eagle - Mazatlán
 https://es.remaxsunseteagle.com/
 
-Sitio con HTML estático: no requiere Playwright. Usa aiohttp + regex.
-Las propiedades están organizadas en 8 zonas (region:1..8) accesibles via:
-  /busqueda/propiedades-mazatlan/region:{N}/
-  /busqueda/propiedades-mazatlan/region:{N}/page:{P}/
+Sitio con HTML server-side (Laravel + Alpine, detrás de Cloudflare sin reto):
+no requiere Playwright. Usa aiohttp + regex.
+
+Desde ~nov-2026 el sitio se rediseñó (antes /busqueda/.../region:N/ y fichas
+/ver-propiedad/<slug>-<id>/, ahora dan 404):
+  Listado:          /propiedades?page=<P>   (12 por página; la tarjeta trae
+                    "Tipo · Colonia · Zona", con eso se filtra por zona)
+  Ficha:            /propiedades/<slug>
+  Datos de la ficha: JSON-LD Product (precio, moneda, MLS, imagen) +
+  window.__chatPageContext (tipo, zona, MLS) + bloques HTML (specs, amenidades).
 """
 
 import asyncio
@@ -27,8 +33,7 @@ class RemaxSunsetEagleScraper:
     """Scraper para RE/MAX Sunset Eagle (Mazatlán) — descubrimiento por zona + detalle."""
 
     BASE_URL = "https://es.remaxsunseteagle.com"
-    LISTADO_URL = f"{BASE_URL}/propiedades-mazatlan/"
-    BUSQUEDA_URL = f"{BASE_URL}/busqueda/propiedades-mazatlan"
+    LISTADO_URL = f"{BASE_URL}/propiedades"
 
     ZONAS: Dict[int, str] = {
         1: "Centro Histórico",
@@ -39,6 +44,20 @@ class RemaxSunsetEagleScraper:
         6: "Cerritos",
         7: "Nuevo Mazatlán",
         8: "Este Mazatlán",
+    }
+
+    # Palabras con que se reconoce cada zona en la línea "Tipo · Colonia · Zona"
+    # de las tarjetas del listado. (El filtro ?zone= de la web no sirve: Playa Sur,
+    # Nuevo Mazatlán y Este Mazatlán devuelven 0, y usa otra taxonomía.)
+    ZONA_CLAVES: Dict[int, Tuple[str, ...]] = {
+        1: ("centro",),
+        2: ("malecon", "malecón"),
+        3: ("zona dorada", "sabalo", "sábalo", "el cid"),
+        4: ("playa sur",),
+        5: ("marina",),
+        6: ("cerritos",),
+        7: ("nuevo mazatl",),
+        8: ("este mazatl", "oriente"),
     }
 
     DEFAULT_HEADERS = {
@@ -70,48 +89,41 @@ class RemaxSunsetEagleScraper:
         self.image_downloader = ImageDownloader(str(self.images_dir))
         self.normalizer = DataNormalizer()
 
+    async def _recorrer_listado(self, session: aiohttp.ClientSession) -> List[Tuple[str, str]]:
+        """Recorre /propiedades?page=N y devuelve [(url_ficha, meta)], donde meta es
+        la línea de la tarjeta "Condominio · Playa Sur · Centro" (tipo · colonia · zona)."""
+        items: List[Tuple[str, str]] = []
+        seen = set()
+        for page in range(1, 101):  # tope de seguridad (12 por página)
+            html = await self._fetch(session, f"{self.LISTADO_URL}?page={page}")
+            if not html:
+                break
+            agregadas = 0
+            for url, meta in self._extraer_cards_listado(html):
+                if url not in seen:
+                    seen.add(url)
+                    items.append((url, meta))
+                    agregadas += 1
+            if agregadas == 0:
+                break
+        return items
+
+    async def discover_urls_todas(self, session: aiohttp.ClientSession) -> List[str]:
+        """Todas las propiedades del sitio (la zona de cada una sale luego de su ficha)."""
+        return [u for u, _ in await self._recorrer_listado(session)]
+
     async def discover_urls_por_zona(
         self, session: aiohttp.ClientSession, zona_id: int
     ) -> Tuple[List[str], int]:
-        """Recorre todas las páginas de una zona y devuelve (urls_unicas, total_reportado)."""
+        """Propiedades de una zona: listado general filtrado por la línea de la tarjeta."""
         if zona_id not in self.ZONAS:
             raise ValueError(f"Zona {zona_id} inválida. Válidas: {list(self.ZONAS.keys())}")
-
-        urls: List[str] = []
-        seen = set()
-        total = 0
-        page = 1
-        max_paginas = 100
-
-        while page <= max_paginas:
-            url = (
-                f"{self.BUSQUEDA_URL}/region:{zona_id}/page:{page}/"
-                if page > 1
-                else f"{self.BUSQUEDA_URL}/region:{zona_id}/"
-            )
-            html = await self._fetch(session, url)
-            if not html:
-                break
-
-            if page == 1:
-                m = re.search(r"(\d+)\s*Propiedades encontradas", html)
-                if m:
-                    total = int(m.group(1))
-
-            agregadas = 0
-            for u in self._extraer_urls_propiedades_listado(html):
-                if u not in seen:
-                    seen.add(u)
-                    urls.append(u)
-                    agregadas += 1
-
-            if agregadas == 0:
-                break
-            if total and len(urls) >= total:
-                break
-            page += 1
-
-        return urls, total
+        claves = self.ZONA_CLAVES[zona_id]
+        urls = [
+            u for u, meta in await self._recorrer_listado(session)
+            if any(c in meta.lower() for c in claves)
+        ]
+        return urls, len(urls)
 
     async def extraer_detalle(
         self,
@@ -119,7 +131,7 @@ class RemaxSunsetEagleScraper:
         url: str,
         zona_nombre: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Extrae datos completos de una página /ver-propiedad/{slug}/."""
+        """Extrae datos completos de una ficha /propiedades/{slug}."""
         html = await self._fetch(session, url)
         if not html:
             return None
@@ -151,71 +163,69 @@ class RemaxSunsetEagleScraper:
             "imagenes_descargadas": [],
         }
 
-        m = re.search(
-            r'<h1[^>]*class="[^"]*title-view[^"]*"[^>]*>(.*?)</h1>',
-            html, re.DOTALL,
-        )
+        ld = self._extraer_jsonld_producto(html)
+        ctx = self._extraer_chat_context(html)
+
+        # MLS = identificador estable de la propiedad (el id interno cambió con el rediseño)
+        mls = ld.get("sku") or ctx.get("mls")
+        if mls:
+            data["codigo"] = mls
+            data["property_id"] = mls
+
+        m = re.search(r"<h1[^>]*>(.*?)</h1>", html, re.DOTALL)
+        data["titulo"] = self._clean_text(m.group(1)) if m else (ld.get("name") or ctx.get("title"))
+
+        if ctx.get("type"):
+            data["tipo_propiedad"] = ctx["type"].strip().lower()
+        m = re.search(r'title="MLS">[^<]*</span>\s*<span[^>]*x-text="[^"]*\?\s*\'En (Venta|Renta|Preventa)\'', html)
         if m:
-            titulo_full = self._clean_text(m.group(1))
-            data["titulo"] = titulo_full
-            tipo_match = re.search(
-                r",\s*([\wáéíóúñÁÉÍÓÚÑ\s]+?)\s+en\s+(Venta|Renta|Preventa)\s*$",
-                titulo_full, re.IGNORECASE,
-            )
-            if tipo_match:
-                data["tipo_propiedad"] = tipo_match.group(1).strip().lower()
-                data["tipo_operacion"] = tipo_match.group(2).capitalize()
+            data["tipo_operacion"] = m.group(1)
+        if not data["zona"] and ctx.get("zone"):
+            data["zona"] = ctx["zone"].strip()
 
-        m = re.search(r'<span\s+class="direccion"[^>]*>(.*?)</span>', html, re.DOTALL)
+        # Ubicación corta (badge "Marina, GRAND MARINA…") y dirección completa (bajo el mapa)
+        m = re.search(r'title="MLS">.*?<span class="bg-cream[^"]*"[^>]*>(.*?)</span>', html, re.DOTALL)
         if m:
-            direccion_raw = self._clean_text(
-                re.sub(r"<!--.*?-->", "", m.group(1), flags=re.DOTALL)
-            )
-            data["direccion_completa"] = direccion_raw
-            data["ubicacion"] = direccion_raw
-
-        m = re.search(
-            r'<span\s+class="precio"[^>]*>\s*([^<]+?)\s*<span\s+class="dt"[^>]*>([^<]+)</span>',
-            html, re.DOTALL,
-        )
+            data["ubicacion"] = self._clean_text(m.group(1))
+        m = re.search(r'</iframe>\s*</div>\s*<p class="text-gray-500 text-sm leading-relaxed">(.*?)</p>', html, re.DOTALL)
         if m:
-            precio_txt = self._clean_text(m.group(1))
-            moneda_txt = self._clean_text(m.group(2))
-            data["precio"] = f"{precio_txt} {moneda_txt}".strip()
-            normalizado = self.normalizer.normalizar_precio(data["precio"])
-            data["precio_numerico"] = normalizado.get("precio_numerico")
-            data["moneda"] = normalizado.get("moneda") or (
-                "MXN" if "MXN" in moneda_txt or "pesos" in moneda_txt.lower()
-                else "USD" if "USD" in moneda_txt or "dól" in moneda_txt.lower()
-                else None
-            )
+            data["direccion_completa"] = self._clean_text(m.group(1))
+            data["ubicacion"] = data["ubicacion"] or data["direccion_completa"]
 
-        pares = self._extraer_pares_dd_dt(html)
-        self._mapear_pares_a_data(pares, data)
+        # Precio: JSON-LD (numérico + moneda); el texto visible como precio legible
+        oferta = ld.get("offers") or {}
+        if isinstance(oferta, list):
+            oferta = oferta[0] if oferta else {}
+        moneda = oferta.get("priceCurrency")
+        try:
+            data["precio_numerico"] = float(oferta.get("price")) if oferta.get("price") else None
+        except (TypeError, ValueError):
+            data["precio_numerico"] = None
+        data["moneda"] = moneda
+        m = re.search(r'<p class="text-2xl font-bold text-primary[^"]*">([^<]+)</p>', html)
+        if m:
+            data["precio"] = self._clean_text(m.group(1))
+        elif data["precio_numerico"]:
+            data["precio"] = f"${data['precio_numerico']:,.0f} {moneda or ''}".strip()
 
-        m = re.search(
-            r'<div\s+class="descripcion_propiedad"[^>]*>.*?<div\s+class="parrafo"[^>]*>\s*<p[^>]*>(.*?)</p>',
-            html, re.DOTALL,
-        )
+        self._extraer_specs(html, data)
+
+        m = re.search(r'<div class="prose[^"]*">(.*?)</div>', html, re.DOTALL)
         if m:
             data["descripcion"] = self._clean_text(m.group(1))
+        else:
+            data["descripcion"] = ld.get("description")
 
         data["agente"] = self._extraer_agente(html)
+        data["amenidades"] = self._extraer_amenidades(html)
 
-        m = re.search(r'<ul\s+class="lista_amenidades"[^>]*>(.*?)</ul>', html, re.DOTALL)
-        if m:
-            data["amenidades"] = [
-                self._clean_text(li)
-                for li in re.findall(r"<li[^>]*>(.*?)</li>", m.group(1), re.DOTALL)
-            ]
-
-        urls_imgs = self._extraer_urls_imagenes(html, prop_id)
+        urls_imgs = self._extraer_urls_imagenes(html, ld)
         data["imagenes"] = urls_imgs[: self.max_imagenes_por_propiedad]
-        if self.descargar_imagenes and data["imagenes"] and prop_id:
+        if self.descargar_imagenes and data["imagenes"] and data["property_id"]:
             data["imagenes_descargadas"] = await self.image_downloader.descargar_multiples(
                 data["imagenes"],
                 prefijo=self.site_name,
-                carpeta_propiedad=f"{self.site_name}_{prop_id}",
+                carpeta_propiedad=f"{self.site_name}_{data['property_id']}",
             )
 
         return data
@@ -282,141 +292,117 @@ class RemaxSunsetEagleScraper:
             print(f"   ✗ Fetch error en {url}: {e}")
             return None
 
+    def _extraer_cards_listado(self, html: str) -> List[Tuple[str, str]]:
+        cards = []
+        for art in re.findall(r"<article\b.*?</article>", html, re.DOTALL):
+            m = re.search(r'href="((?:https://es\.remaxsunseteagle\.com)?/propiedades/[a-z0-9-]+)"', art)
+            if not m:
+                continue
+            meta = re.search(r'<p class="text-sm text-gray-500 mb-3">(.*?)</p>', art, re.DOTALL)
+            cards.append((urljoin(self.BASE_URL, m.group(1)), self._clean_text(meta.group(1)) if meta else ""))
+        return cards
+
     def _extraer_urls_propiedades_listado(self, html: str) -> List[str]:
         urls = []
         seen = set()
-        for m in re.finditer(r'href="(/ver-propiedad/[^"]+)"', html):
+        for m in re.finditer(r'href="((?:https://es\.remaxsunseteagle\.com)?/propiedades/[a-z0-9-]+)"', html):
             u = urljoin(self.BASE_URL, m.group(1))
             if u not in seen:
                 seen.add(u)
                 urls.append(u)
         return urls
 
-    def _extraer_pares_dd_dt(self, html: str) -> List[Tuple[str, str]]:
-        m = re.search(
-            r'<div\s+class="info_propiedad"[^>]*>(.*?)</div>\s*<div\s+class="acciones"',
-            html, re.DOTALL,
-        )
-        bloque = m.group(1) if m else html
+    @staticmethod
+    def _extraer_jsonld_producto(html: str) -> Dict[str, Any]:
+        for m in re.finditer(r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL):
+            try:
+                obj = json.loads(m.group(1))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict) and obj.get("@type") == "Product":
+                return obj
+        return {}
 
-        tokens: List[Tuple[str, str]] = []
-        for tm in re.finditer(r'<span\s+class="(dd|dt)"[^>]*>(.*?)</span>', bloque, re.DOTALL):
-            kind = tm.group(1)
-            text = self._clean_text(tm.group(2))
-            if text:
-                tokens.append((kind, text))
+    @staticmethod
+    def _extraer_chat_context(html: str) -> Dict[str, str]:
+        """Lee window.__chatPageContext = { title: "...", mls: "...", zone: "...", type: "..." }."""
+        m = re.search(r"window\.__chatPageContext\s*=\s*\{(.*?)\};", html, re.DOTALL)
+        if not m:
+            return {}
+        ctx = {}
+        for k, v in re.findall(r'(\w+):\s*"((?:[^"\\]|\\.)*)"', m.group(1)):
+            try:
+                ctx[k] = json.loads(f'"{v}"')  # resuelve escapes \u00e1
+            except json.JSONDecodeError:
+                ctx[k] = v
+        return ctx
 
-        pares: List[Tuple[str, str]] = []
-        i = 0
-        while i < len(tokens) - 1:
-            k1, t1 = tokens[i]
-            k2, t2 = tokens[i + 1]
-            if k1 == "dd" and k2 == "dt":
-                pares.append((t1, t2))
-                i += 2
-            elif k1 == "dt" and k2 == "dd":
-                pares.append((t2, t1))
-                i += 2
-            else:
-                i += 1
-        return pares
-
-    def _mapear_pares_a_data(self, pares: List[Tuple[str, str]], data: Dict[str, Any]):
+    def _extraer_specs(self, html: str, data: Dict[str, Any]):
+        """Bloque de iconos: 🛏 recámaras, 🛁 baños, 🏠 m² construcción, 📐 m² lote, 🏢 piso, 🚗 estac."""
         terreno = data.setdefault("terreno", {})
         caract = data.setdefault("caracteristicas", {})
+        patron = (
+            r'<p class="text-2xl font-bold text-deep"(?:\s+x-text="\$store\.lang\?\.is\(\'es\'\)\s*\?\s*\'([^\']*)\'[^"]*")?>([^<]*)</p>'
+            r'\s*<p class="text-xs text-gray-500[^"]*"\s+x-text="\$store\.lang\?\.is\(\'es\'\)\s*\?\s*\'([^\']*)\''
+        )
+        for valor_es, valor_txt, label in re.findall(patron, html):
+            valor = (valor_es or valor_txt).strip()
+            num = re.search(r"\d[\d,]*(?:\.\d+)?", valor)
+            if not num:
+                continue
+            n = float(num.group(0).replace(",", ""))
+            lab = label.lower()
+            if "lote" in lab or "terreno" in lab:
+                terreno["superficie_m2"] = n
+                terreno["superficie"] = f"{n:g} m²"
+            elif "constr" in lab:
+                terreno["superficie_construida_m2"] = n
+                terreno["superficie_construida"] = f"{n:g} m²"
+            elif "rec" in lab:
+                caract["recamaras"] = int(n)
+            elif "medio" in lab:
+                caract["medios_banos"] = int(n)
+            elif "baño" in lab or "bano" in lab:
+                caract["banos"] = n
+            elif "piso" in lab or "nivel" in lab:
+                caract["pisos"] = int(n)
+            elif "estac" in lab:
+                caract["estacionamientos"] = int(n)
 
-        for valor, label in pares:
-            label_low = label.lower()
-            valor_clean = re.sub(r"<[^>]+>", "", valor).strip()
-
-            if "código" in label_low or "codigo" in label_low:
-                data["codigo"] = valor_clean
-            elif label_low.startswith("m2") or "m²" in label_low:
-                num = re.search(r"\d[\d,]*(?:\.\d+)?", valor_clean)
-                if num:
-                    n = float(num.group(0).replace(",", ""))
-                    if "lote" in valor_clean.lower():
-                        terreno["superficie_m2"] = n
-                        terreno["superficie"] = f"{n:g} m²"
-                    elif "constr" in valor_clean.lower():
-                        terreno["superficie_construida_m2"] = n
-                        terreno["superficie_construida"] = f"{n:g} m²"
-                    else:
-                        terreno.setdefault("superficie_m2", n)
-            elif "recámara" in label_low or "recamara" in label_low:
-                num = re.search(r"\d+", valor_clean)
-                if num:
-                    caract["recamaras"] = int(num.group(0))
-            elif "medio baño" in label_low or "medio bano" in label_low:
-                num = re.search(r"\d+", valor_clean)
-                if num:
-                    caract["medios_banos"] = int(num.group(0))
-            elif "baño" in label_low or "bano" in label_low:
-                num = re.search(r"[\d.]+", valor_clean)
-                if num:
-                    caract["banos"] = float(num.group(0))
-            elif "piso" in label_low:
-                num = re.search(r"\d+", valor_clean)
-                if num:
-                    caract["pisos"] = int(num.group(0))
-            elif "vista" in label_low:
-                caract["vista"] = valor_clean
-            elif "estacionamiento" in label_low or "cocheras" in label_low:
-                num = re.search(r"\d+", valor_clean)
-                if num:
-                    caract["estacionamientos"] = int(num.group(0))
+    def _extraer_amenidades(self, html: str) -> List[str]:
+        i = html.find("'Amenidades' : 'Amenities'")
+        if i < 0:
+            return []
+        fin = html.find("</iframe>", i)
+        bloque = html[i: fin if fin > 0 else i + 20000]
+        return [
+            self._clean_text(t)
+            for t in re.findall(r"</svg>\s*<span[^>]*>(.*?)</span>", bloque, re.DOTALL)
+            if self._clean_text(t)
+        ]
 
     def _extraer_agente(self, html: str) -> Dict[str, Any]:
         agente: Dict[str, Any] = {}
-
-        bloque_match = re.search(
-            r'<h3[^>]*>Asociado encargado[^<]*</h3>(.*?)(?=<div\s+class="bloque-info"|</section>)',
-            html, re.DOTALL,
+        m = re.search(
+            r'<a href="(https://es\.remaxsunseteagle\.com/agentes/[^"]+)"[^>]*>\s*<img src="([^"]+)"[^>]*>\s*<div>\s*<p[^>]*>([^<]+)</p>',
+            html,
         )
-        if not bloque_match:
-            return agente
-        bloque = bloque_match.group(1)
-
-        m = re.search(r'<span\s+class="nombre-agente"[^>]*>([^<]+)</span>', bloque)
         if m:
-            agente["nombre"] = self._clean_text(m.group(1))
-
-        m = re.search(r'<img[^>]*src="([^"]+)"', bloque)
-        if m:
-            agente["foto"] = urljoin(self.BASE_URL, m.group(1))
-
-        # Email: buscar cualquier patrón de email dentro del bloque del agente
-        email_match = re.search(r"[\w._%+-]+@[\w.-]+\.[A-Za-z]{2,}", bloque)
-        if email_match:
-            agente["email"] = email_match.group(0)
-
-        m = re.search(r'href="(/listado_propiedades/agente:[^"]+)"', bloque)
-        if m:
-            agente["perfil_url"] = urljoin(self.BASE_URL, m.group(1))
-
+            agente["perfil_url"] = m.group(1)
+            agente["foto"] = urljoin(self.BASE_URL, m.group(2))
+            agente["nombre"] = self._clean_text(m.group(3))
         return agente
 
-    def _extraer_urls_imagenes(self, html: str, prop_id: Optional[str]) -> List[str]:
-        if prop_id:
-            patron = rf'/files/Propiedad/{re.escape(prop_id)}/Foto/view/(\d+)-(\d+)\.(jpg|jpeg|png|webp)'
-        else:
-            patron = r'/files/Propiedad/\d+/Foto/view/(\d+)-(\d+)\.(jpg|jpeg|png|webp)'
-
-        encontrados = []
-        seen = set()
-        for m in re.finditer(patron, html, re.IGNORECASE):
-            full = m.group(0)
-            if full not in seen:
-                seen.add(full)
-                idx = int(m.group(1))
-                encontrados.append((idx, urljoin(self.BASE_URL, full)))
-
-        encontrados.sort(key=lambda x: x[0])
-        return [u for _, u in encontrados]
+    def _extraer_urls_imagenes(self, html: str, ld: Dict[str, Any]) -> List[str]:
+        imgs = ld.get("image") or []
+        if isinstance(imgs, str):
+            imgs = [imgs]
+        return [urljoin(self.BASE_URL, u) for u in imgs if isinstance(u, str)]
 
     @staticmethod
     def _extraer_property_id(url: str) -> Optional[str]:
-        m = re.search(r"/ver-propiedad/.+?-(\d+)/?$", url)
+        """Fallback si la ficha no trae MLS: el slug de /propiedades/<slug>."""
+        m = re.search(r"/propiedades/([a-z0-9-]+)/?$", url)
         return m.group(1) if m else None
 
     @staticmethod

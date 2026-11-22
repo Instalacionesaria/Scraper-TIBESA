@@ -223,6 +223,12 @@ class NocNokScraper:
             full = det.get("property") if isinstance(det.get("property"), dict) else {}
 
             titulo = (it.get("title") or full.get("title") or "").strip() or None
+            if not titulo:
+                # NocNok deja `title` en null en la mayoría de fichas y su web lo arma
+                # al vuelo como "<Tipo> en Venta en <Colonia, Ciudad, Estado>".
+                tipo_txt = (it.get("typeText") or full.get("typeText") or "Terreno").strip()
+                lugar = (it.get("location") or full.get("location") or "Mazatlán, Sinaloa").strip()
+                titulo = f"{tipo_txt} en Venta en {lugar}"
 
             # Precio + moneda (operación de venta)
             precio = None

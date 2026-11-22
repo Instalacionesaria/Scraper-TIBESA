@@ -43,6 +43,7 @@ from scrapers.doorvel import DoorvelScraper
 from scrapers.palmaz import PalmazScraper
 from scrapers.nocnok import NocNokScraper
 from scrapers.kwmexico import KWMexicoScraper
+from scrapers.errores import SitioBloqueadoError, HTTP_BLOQUEO
 import aiohttp
 from utils.agente_propiedades import procesar_propiedad_con_llm
 from utils.propiedades_db import upsert_propiedades, obtener_propiedades, estado_propiedades, registrar_scrapeo
@@ -286,7 +287,13 @@ async def _extraer_urls_lamudi(config: dict) -> List[str]:
                 page_url = base_url if num_pagina == 1 else f"{base_url}?page={num_pagina}"
                 print(f"📄 Lamudi - Página {num_pagina}: {page_url}")
 
-                await page.goto(page_url, wait_until='networkidle', timeout=60000)
+                resp = await page.goto(page_url, wait_until='networkidle', timeout=60000)
+                # Lamudi (CloudFront) responde 401 "Access Denied" a IPs que no acepta.
+                if resp is not None and resp.status in HTTP_BLOQUEO:
+                    if num_pagina == 1:
+                        raise SitioBloqueadoError(config['name'], resp.status)
+                    print(f"   → HTTP {resp.status} en la página {num_pagina}, se corta la paginación")
+                    break
                 await page.wait_for_timeout(3000)
 
                 # Scroll para cargar contenido lazy
@@ -568,19 +575,24 @@ async def _event_generator_remax(site_id: str, config: dict, zona_ids: List[int]
     all_targets: List[tuple] = []  # [(url, zona_nombre)]
     try:
         async with aiohttp.ClientSession(headers=scraper.DEFAULT_HEADERS) as session:
-            for zid in zona_ids:
-                if await request.is_disconnected():
-                    return
-                urls, _ = await scraper.discover_urls_por_zona(session, zid)
-                zona_nombre = scraper.ZONAS[zid]
-                all_targets.extend([(u, zona_nombre) for u in urls])
+            if len(zona_ids) > 1:
+                # Todas las zonas: listado general (la zona sale de cada ficha)
+                urls = await scraper.discover_urls_todas(session)
+                all_targets.extend([(u, None) for u in urls])
+            else:
+                for zid in zona_ids:
+                    if await request.is_disconnected():
+                        return
+                    urls, _ = await scraper.discover_urls_por_zona(session, zid)
+                    zona_nombre = scraper.ZONAS[zid]
+                    all_targets.extend([(u, zona_nombre) for u in urls])
     except Exception as e:
         yield {"event": "error", "data": json.dumps({"message": f"Error en discovery: {str(e)}"})}
         return
 
     total = len(all_targets)
     if total == 0:
-        yield {"event": "error", "data": json.dumps({"message": "No se encontraron propiedades en las zonas solicitadas"})}
+        yield _done_sin_scrapeo(config, 'sin_resultados')
         return
 
     yield {
@@ -670,6 +682,28 @@ async def _event_generator_remax(site_id: str, config: dict, zona_ids: List[int]
     }
 
 
+def _done_sin_scrapeo(config: dict, motivo: str, status: Optional[int] = None) -> dict:
+    """Evento `done` para una corrida que no llegó a scrapear nada.
+
+    No se guarda ni se registra en el historial (no ensucia el tiempo promedio)
+    y lo ya guardado en Supabase sigue disponible con "Consultar guardado".
+    """
+    nombre = config['name']
+    if motivo == 'sitio_bloqueado':
+        mensaje = (f"{nombre} está bloqueando el acceso a nuestro servidor (HTTP {status}). "
+                   "No se actualizó nada: puedes seguir consultando lo guardado anteriormente.")
+    else:
+        mensaje = (f"{nombre} no devolvió propiedades (posible bloqueo o cambio en su web). "
+                   "No se actualizó nada: puedes seguir consultando lo guardado anteriormente.")
+    return {
+        "event": "done",
+        "data": json.dumps({
+            "total": 0, "exitosas": 0, "con_ia": 0, "fallidas": 0, "guardadas": 0,
+            "motivo": motivo, "http_status": status, "mensaje": mensaje,
+        }, ensure_ascii=False),
+    }
+
+
 async def _event_generator_listing(site_id: str, config: dict, request: Request):
     """Generador SSE para scrapers que extraen datos del listado (Mitula)"""
     yield {
@@ -685,11 +719,17 @@ async def _event_generator_listing(site_id: str, config: dict, request: Request)
 
     try:
         propiedades = await scraper.extraer_todas_las_propiedades()
+    except SitioBloqueadoError as e:
+        yield _done_sin_scrapeo(config, 'sitio_bloqueado', e.status)
+        return
     except Exception as e:
         yield {"event": "error", "data": json.dumps({"message": f"Error en scraping: {str(e)}"})}
         return
 
     total = len(propiedades)
+    if total == 0:
+        yield _done_sin_scrapeo(config, 'sin_resultados')
+        return
 
     for prop in propiedades:
         if await request.is_disconnected():
@@ -798,11 +838,17 @@ async def _event_generator_detail(site_id: str, config: dict, request: Request):
 
     try:
         urls = await extraer_urls_del_listado(site_id)
+    except SitioBloqueadoError as e:
+        yield _done_sin_scrapeo(config, 'sitio_bloqueado', e.status)
+        return
     except Exception as e:
         yield {"event": "error", "data": json.dumps({"message": f"Error extrayendo URLs: {str(e)}"})}
         return
 
     total = len(urls)
+    if total == 0:
+        yield _done_sin_scrapeo(config, 'sin_resultados')
+        return
     yield {
         "event": "phase",
         "data": json.dumps({"phase": "scraping", "message": f"Scrapeando {total} propiedades...", "total": total})

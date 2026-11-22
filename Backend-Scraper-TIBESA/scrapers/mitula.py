@@ -16,6 +16,7 @@ from playwright.async_api import async_playwright, Page
 
 from utils.image_downloader import ImageDownloader
 from utils.data_normalizer import DataNormalizer
+from scrapers.errores import SitioBloqueadoError, HTTP_BLOQUEO
 
 
 class MitulaScraper:
@@ -78,7 +79,12 @@ class MitulaScraper:
                 print(f"\n📄 Mitula - Página {num_pagina}: {page_url}")
 
                 try:
-                    await page.goto(page_url, wait_until='networkidle', timeout=60000)
+                    resp = await page.goto(page_url, wait_until='networkidle', timeout=60000)
+                    if resp is not None and resp.status in HTTP_BLOQUEO:
+                        if num_pagina == 1:
+                            raise SitioBloqueadoError('Mitula', resp.status)
+                        print(f"   → HTTP {resp.status} en la página {num_pagina}, se corta la paginación")
+                        break
                     await page.wait_for_timeout(3000)
 
                     # Scroll para cargar lazy images
@@ -93,6 +99,8 @@ class MitulaScraper:
                     }""")
                     await page.wait_for_timeout(1500)
 
+                except SitioBloqueadoError:
+                    raise
                 except Exception as e:
                     print(f"   ❌ Error cargando página {num_pagina}: {e}")
                     break

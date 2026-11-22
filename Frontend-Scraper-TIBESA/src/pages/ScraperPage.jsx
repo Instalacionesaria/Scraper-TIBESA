@@ -3,6 +3,7 @@ import { Building2, Sparkles, Play, Loader2, CheckCircle2, Globe, XCircle, Datab
 import PropertyCard from '../components/PropertyCard'
 import ChatPanel from '../components/ChatPanel'
 import SummaryPanel from '../components/SummaryPanel'
+import AvisoBloqueoModal from '../components/AvisoBloqueoModal'
 
 // Convierte un timestamp ISO a texto relativo ("hace 2 días", "hace 3 h").
 function tiempoRelativo(iso) {
@@ -55,6 +56,7 @@ const SITES = [
     domain: 'lamudi.com.mx',
     description: 'Portal inmobiliario con +1,400 propiedades en Mazatlán. Casas, departamentos, terrenos y más.',
     totalProperties: 1445,
+    bloqueado: true, // responde HTTP 401 desde nov-2026
   },
   {
     id: 'mitula',
@@ -62,24 +64,25 @@ const SITES = [
     domain: 'casas.mitula.mx',
     description: 'Agregador inmobiliario con ~718 propiedades en venta en Mazatlán. Datos completos desde listado.',
     totalProperties: 718,
+    bloqueado: true, // responde HTTP 401 desde nov-2026
   },
   {
     id: 'remax_sunset_eagle',
     name: 'RE/MAX Sunset Eagle',
     domain: 'es.remaxsunseteagle.com',
     description: 'Inmobiliaria con cobertura en 8 zonas de Mazatlán. Selecciona una zona específica o scrapea todas.',
-    totalProperties: 422,
+    totalProperties: 461,
     hasZoneSelector: true,
     zones: [
-      { id: null, label: 'Todas las zonas', count: 422 },
-      { id: 1, label: 'Centro Histórico', count: 56 },
-      { id: 2, label: 'Malecón', count: 71 },
-      { id: 3, label: 'Zona Dorada / Sábalo', count: 47 },
-      { id: 4, label: 'Playa Sur', count: 2 },
-      { id: 5, label: 'Marina', count: 49 },
-      { id: 6, label: 'Cerritos', count: 64 },
-      { id: 7, label: 'Nuevo Mazatlán', count: 9 },
-      { id: 8, label: 'Este Mazatlán', count: 61 },
+      { id: null, label: 'Todas las zonas', count: 461 },
+      { id: 1, label: 'Centro Histórico', count: 63 },
+      { id: 2, label: 'Malecón', count: 79 },
+      { id: 3, label: 'Zona Dorada / Sábalo', count: 67 },
+      { id: 4, label: 'Playa Sur', count: 7 },
+      { id: 5, label: 'Marina', count: 43 },
+      { id: 6, label: 'Cerritos', count: 66 },
+      { id: 7, label: 'Nuevo Mazatlán', count: 35 },
+      { id: 8, label: 'Este Mazatlán', count: 74 },
     ],
   },
   {
@@ -102,6 +105,7 @@ const SITES = [
     domain: 'casas.trovit.com.mx',
     description: '⚠️ Agregador (recopila de otros portales). ~99 terrenos en Mazatlán. Puede duplicar propiedades ya capturadas por Lamudi/otros. Vía Playwright.',
     totalProperties: 99,
+    bloqueado: true, // responde HTTP 401 desde nov-2026
   },
   {
     id: 'depreventa',
@@ -256,7 +260,7 @@ const SITES = [
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 export default function ScraperPage() {
-  const [status, setStatus] = useState('idle') // idle | extracting | scraping | done | error
+  const [status, setStatus] = useState('idle') // idle | extracting | scraping | done | blocked | error
   const [activeSite, setActiveSite] = useState(null)
   const [progress, setProgress] = useState({ current: 0, total: 0, percent: 0 })
   const [properties, setProperties] = useState([])
@@ -266,6 +270,7 @@ export default function ScraperPage() {
   const [estado, setEstado] = useState({}) // { fuente: { total_propiedades, ultima_actualizacion } }
   const [dataSource, setDataSource] = useState(null) // null | 'live' | 'saved'
   const [loadingSaved, setLoadingSaved] = useState(null) // siteId que se está cargando
+  const [avisoBloqueo, setAvisoBloqueo] = useState(null) // siteId del portal que bloqueó, para el modal
   const eventSourceRef = useRef(null)
 
   // Cargar frescura de los datos guardados por portal
@@ -303,9 +308,16 @@ export default function ScraperPage() {
     }
   }
 
-  const handleStart = (siteId) => {
+  const handleStart = (siteId, { forzar = false } = {}) => {
     const site = SITES.find(s => s.id === siteId)
     if (!site || site.disabled) return
+
+    // Portal que ya sabemos que bloquea: avisar al instante en vez de hacer
+    // esperar al usuario a que el scrapeo falle.
+    if (site.bloqueado && !forzar) {
+      setAvisoBloqueo(siteId)
+      return
+    }
 
     // Reset state
     setStatus('extracting')
@@ -359,6 +371,16 @@ export default function ScraperPage() {
 
     es.addEventListener('done', (e) => {
       const data = JSON.parse(e.data)
+      // El portal no dejó entrar (HTTP 401/403) o no devolvió nada: no es un error
+      // de la app. Se avisa y NO se bloquea nada; lo guardado sigue consultable.
+      if (data.motivo === 'sitio_bloqueado' || data.motivo === 'sin_resultados') {
+        setStatus('blocked')
+        setStats(null)
+        setPhaseMessage(`⚠️ ${data.mensaje}`)
+        if (data.motivo === 'sitio_bloqueado') setAvisoBloqueo(siteId)
+        es.close()
+        return
+      }
       setStatus('done')
       setStats(data)
       if (data.motivo === 'sin_credito_openai') {
@@ -427,6 +449,7 @@ export default function ScraperPage() {
         {SITES.map(site => {
           const isRunning = activeSite === site.id && (status === 'extracting' || status === 'scraping')
           const isDone = activeSite === site.id && status === 'done'
+          const isBlockedNow = activeSite === site.id && status === 'blocked'
           const info = estado[site.id]
           const tieneGuardado = info && info.total_propiedades > 0
           const isLoadingSaved = loadingSaved === site.id
@@ -437,6 +460,7 @@ export default function ScraperPage() {
               className={`rounded-xl border p-5 transition-all ${
                 isRunning ? 'border-sky-300 bg-sky-50 ring-2 ring-sky-100' :
                 isDone ? 'border-green-300 bg-green-50' :
+                isBlockedNow ? 'border-amber-300 bg-amber-50' :
                 site.disabled ? 'border-gray-200 bg-gray-50 opacity-60' :
                 'border-gray-200 bg-white hover:shadow-sm'
               }`}
@@ -461,6 +485,11 @@ export default function ScraperPage() {
                     <CheckCircle2 className="w-3 h-3" /> Completado
                   </span>
                 )}
+                {(isBlockedNow || (site.bloqueado && !isRunning && !isDone)) && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                    <ShieldAlert className="w-3 h-3" /> Acceso bloqueado
+                  </span>
+                )}
                 {site.blocked && (
                   <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
                     <ShieldAlert className="w-3 h-3" /> Bloquea scrapers
@@ -474,6 +503,19 @@ export default function ScraperPage() {
               </div>
 
               <p className="text-sm text-gray-600 mb-3">{site.description}</p>
+
+              {/* Aviso fijo: el portal bloquea la actualización, usar lo guardado */}
+              {site.bloqueado && (
+                <div className="mb-3 flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm leading-relaxed text-amber-900">
+                  <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  <span>
+                    <strong>{site.name} está bloqueando las actualizaciones.</strong>{' '}
+                    {tieneGuardado
+                      ? 'Puede seguir trabajando con las propiedades guardadas: use el botón verde "Consultar guardado".'
+                      : 'Por ahora no se pueden traer sus propiedades.'}
+                  </span>
+                </div>
+              )}
 
               {/* Datos guardados en Supabase */}
               {!site.disabled && tieneGuardado && (
@@ -603,7 +645,7 @@ export default function ScraperPage() {
 
       {/* Banner: datos guardados (consulta sin scrapear) */}
       {dataSource === 'saved' && properties.length > 0 && (
-        <div className="mb-4 flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2.5 rounded-lg text-sm">
+        <div id="resultados-guardados" className="mb-4 scroll-mt-4 flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2.5 rounded-lg text-sm">
           <Database className="w-4 h-4 shrink-0" />
           <span>
             Mostrando <strong>{properties.length}</strong> propiedades guardadas de{' '}
@@ -639,10 +681,11 @@ export default function ScraperPage() {
                 className={`h-3 rounded-full transition-all duration-500 ${
                   status === 'done' ? 'bg-green-500' :
                   status === 'error' ? 'bg-red-500' :
+                  status === 'blocked' ? 'bg-amber-400' :
                   status === 'extracting' ? 'bg-sky-400 animate-pulse' :
                   'bg-sky-500'
                 }`}
-                style={{ width: status === 'extracting' ? '100%' : `${progress.percent}%` }}
+                style={{ width: status === 'extracting' || status === 'blocked' ? '100%' : `${progress.percent}%` }}
               />
             </div>
 
@@ -702,6 +745,31 @@ export default function ScraperPage() {
           </div>
         </div>
       )}
+
+      {/* Modal: el portal bloquea la actualización → ofrecer lo guardado */}
+      {avisoBloqueo && (() => {
+        const site = SITES.find(s => s.id === avisoBloqueo)
+        const info = estado[avisoBloqueo]
+        return (
+          <AvisoBloqueoModal
+            sitio={site?.name || avisoBloqueo}
+            totalGuardadas={info?.total_propiedades || 0}
+            fechaGuardado={fechaLarga(info?.ultima_actualizacion)}
+            onVerGuardado={async () => {
+              setAvisoBloqueo(null)
+              await handleConsultarGuardado(avisoBloqueo)
+              // Llevarlo a los resultados: quedan debajo de todas las tarjetas
+              setTimeout(() => document.getElementById('resultados-guardados')
+                ?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
+            }}
+            onIntentarIgual={site?.bloqueado && !isActive ? () => {
+              setAvisoBloqueo(null)
+              handleStart(avisoBloqueo, { forzar: true })
+            } : undefined}
+            onCerrar={() => setAvisoBloqueo(null)}
+          />
+        )
+      })()}
     </div>
   )
 }

@@ -6,8 +6,8 @@ Inmuebles24, inmobiliarias, etc.), por lo que puede DUPLICAR propiedades que ya
 están en los otros scrapers. El enlace de detalle es un redirect de Trovit hacia
 el sitio fuente.
 
-Anti-bot: HTTP plano recibe 401 "Access Denied"; un navegador real (Playwright)
-pasa sin reto persistente. Por eso usa Playwright internamente (como Mitula) y se
+Anti-bot: HTTP plano recibe 401 "Access Denied". Hasta nov-2026 un navegador real (Playwright)
+pasaba sin reto; desde entonces también recibe 401 (ver más abajo). Usa Playwright internamente (como Mitula) y se
 scrapea del listado (`article.snippet-listing`), 30 por página, paginado
 `/terreno-mazatlan/{N}`.
 """
@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from playwright.async_api import async_playwright
 
 from utils.data_normalizer import DataNormalizer
+from scrapers.errores import SitioBloqueadoError, HTTP_BLOQUEO
 
 BASE = "https://casas.trovit.com.mx"
 LISTADO_URL = f"{BASE}/terreno-mazatlan"
@@ -77,10 +78,17 @@ class TrovitScraper:
                 for num in range(1, tope + 1):
                     url = self.LISTADO_URL if num == 1 else f"{self.LISTADO_URL}/{num}"
                     try:
-                        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                        await page.wait_for_timeout(3500)
+                        resp = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
                     except Exception:
                         break
+                    # Desde nov-2026 Trovit (nginx de Lifull, igual que Mitula) responde
+                    # 401 "Access Denied" incluso a un navegador real.
+                    if resp is not None and resp.status in HTTP_BLOQUEO:
+                        if num == 1:
+                            raise SitioBloqueadoError("Trovit", resp.status)
+                        print(f"   → HTTP {resp.status} en la página {num}, se corta la paginación")
+                        break
+                    await page.wait_for_timeout(3500)
 
                     crudas = await self._extraer_cards(page)
                     nuevas = [c for c in crudas if c.get("data_id") and c["data_id"] not in vistos]

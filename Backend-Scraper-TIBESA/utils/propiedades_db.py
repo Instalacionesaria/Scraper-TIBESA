@@ -16,6 +16,7 @@ from leads.supabase_client import SUPABASE_URL, SUPABASE_KEY
 
 TABLA = "tibesa_web_propiedades"
 TABLA_LOG = "tibesa_scrapeos_log"
+PAGINA_LECTURA = 1000  # máximo de filas que PostgREST devuelve por consulta
 
 # Portales conocidos (coincide con las claves de SCRAPERS_MAP en main.py)
 FUENTES = ["paraiso_dorado", "lamudi", "mitula", "remax_sunset_eagle", "pincali", "propiedades_com", "casasyterrenos", "century21", "depreventa", "trovit", "mazatlan_br", "icasas", "spezia", "realtor", "buscatucasa", "doorvel", "palmaz", "nocnok", "kwmexico"]
@@ -108,20 +109,30 @@ def upsert_propiedades(fuente: str, propiedades: List[Dict[str, Any]]) -> int:
 def obtener_propiedades(fuente: Optional[str] = None, limit: int = 500) -> List[Dict[str, Any]]:
     """
     Devuelve el payload completo (columna `datos`) de las propiedades guardadas.
-    Si se pasa `fuente`, filtra por ese portal. Pensado para alimentar al chat.
+    Si se pasa `fuente`, filtra por ese portal. Hasta `limit` filas.
+
+    Supabase (PostgREST) devuelve como máximo 1000 filas por consulta, así que se
+    pagina con offset hasta llegar a `limit` o agotar los datos.
     """
-    params = f"?select=datos&order=scraped_at.desc&limit={limit}"
+    base = f"?select=datos&order=scraped_at.desc,property_id.asc"
     if fuente:
-        params += f"&fuente=eq.{fuente}"
+        base += f"&fuente=eq.{fuente}"
+    datos: List[Dict[str, Any]] = []
     try:
-        r = requests.get(f"{SUPABASE_URL}/rest/v1/{TABLA}{params}", headers=_headers(), timeout=30)
-        if not r.ok:
-            print(f"❌ Error leyendo propiedades: {r.status_code} {r.text[:200]}")
-            return []
-        return [row["datos"] for row in r.json() if row.get("datos")]
+        while len(datos) < limit:
+            tam = min(PAGINA_LECTURA, limit - len(datos))
+            params = f"{base}&limit={tam}&offset={len(datos)}"
+            r = requests.get(f"{SUPABASE_URL}/rest/v1/{TABLA}{params}", headers=_headers(), timeout=30)
+            if not r.ok:
+                print(f"❌ Error leyendo propiedades: {r.status_code} {r.text[:200]}")
+                break
+            filas = r.json()
+            datos.extend(row["datos"] for row in filas if row.get("datos"))
+            if len(filas) < tam:
+                break
     except Exception as e:
         print(f"❌ Excepción leyendo propiedades: {e}")
-        return []
+    return datos
 
 
 def registrar_scrapeo(

@@ -1069,7 +1069,7 @@ async def propiedades_estado():
 
 
 @app.get("/api/propiedades")
-async def propiedades_guardadas(fuente: Optional[str] = None, limit: int = 500):
+async def propiedades_guardadas(fuente: Optional[str] = None, limit: int = 5000):
     """
     Devuelve las propiedades ya guardadas en Supabase (sin scrapear), en el mismo
     formato de tarjeta que emite el scraping en vivo.

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { LineChart, Send, Loader2, Bot, User, RotateCcw, History, Trash2, ArrowLeft, MessageSquare } from 'lucide-react'
+import { LineChart, Send, Loader2, Bot, User, RotateCcw, History, Trash2, ArrowLeft, MessageSquare, BarChart3 } from 'lucide-react'
+import PanelGraficos from '../components/PanelGraficos'
 import { getCredentials } from '../lib/auth'
 import {
-  askAnalistaMercado, borrarConversacion, getConversacion, getResumenMercado, listarConversaciones,
+  askAnalistaMercado, borrarConversacion, getConversacion, getPanorama, getResumenMercado, listarConversaciones,
 } from '../lib/mercadoApi'
 
 // Solo guardamos el id de la conversación actual; los mensajes viven en el backend (checkpointer).
@@ -82,12 +83,23 @@ export default function AnalistaMercadoPage() {
   const [resumen, setResumen] = useState(null)
   const [vista, setVista] = useState('chat') // chat | historial
   const [historial, setHistorial] = useState(null)
+  const [panorama, setPanorama] = useState(null) // gráficos generales
+  const [seleccion, setSeleccion] = useState(null) // índice del mensaje cuyos gráficos se ven; null = panorama
   const finRef = useRef(null)
   const inputRef = useRef(null)
 
   useEffect(() => {
     getResumenMercado().then(setResumen).catch(() => setResumen(null))
+    getPanorama().then((p) => setPanorama(p.graficos || [])).catch(() => setPanorama([]))
   }, [])
+
+  // Índice de la última respuesta con gráficos (la que se muestra por defecto).
+  const ultimaConGraficos = (lista) => {
+    for (let i = lista.length - 1; i >= 0; i -= 1) {
+      if (lista[i].role === 'assistant' && lista[i].graficos?.length) return i
+    }
+    return null
+  }
 
   // Al entrar, retomar la última conversación guardada en el servidor.
   useEffect(() => {
@@ -95,8 +107,13 @@ export default function AnalistaMercadoPage() {
     let activo = true
     setCargando(true)
     getConversacion(threadId, usuario)
-      .then((c) => { if (activo) setMensajes(c.mensajes || []) })
-      .catch(() => { if (activo) setMensajes([]) })
+      .then((c) => {
+        if (!activo) return
+        const lista = c.mensajes || []
+        setMensajes(lista)
+        setSeleccion(ultimaConGraficos(lista))
+      })
+      .catch(() => { if (activo) { setMensajes([]); setSeleccion(null) } })
       .finally(() => { if (activo) setCargando(false) })
     return () => { activo = false }
   }, [threadId, usuario])
@@ -139,8 +156,10 @@ export default function AnalistaMercadoPage() {
     setInput('')
     setPensando(true)
     try {
-      const { response } = await askAnalistaMercado({ threadId, mensaje: pregunta, usuario })
-      setMensajes((prev) => [...prev, { role: 'assistant', content: response }])
+      const { response, graficos } = await askAnalistaMercado({ threadId, mensaje: pregunta, usuario })
+      setMensajes((prev) => [...prev, { role: 'assistant', content: response, graficos: graficos || [] }])
+      // índice de la respuesta: mensajes previos + la pregunta recién agregada
+      if (graficos?.length) setSeleccion(mensajes.length + 1)
     } catch (e) {
       setMensajes((prev) => [
         ...prev,
@@ -155,6 +174,7 @@ export default function AnalistaMercadoPage() {
   const nuevaConversacion = () => {
     setThreadId(nuevoId())
     setMensajes([])
+    setSeleccion(null)
     setInput('')
     setVista('chat')
     inputRef.current?.focus()
@@ -162,9 +182,11 @@ export default function AnalistaMercadoPage() {
 
   const fecha = formatearFecha(resumen?.actualizado)
   const vacia = mensajes.length === 0
+  const graficosRespuesta = seleccion !== null ? mensajes[seleccion]?.graficos : null
+  const ultimaIdx = ultimaConGraficos(mensajes)
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-5xl flex-col">
+    <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-[1600px] flex-col lg:h-[calc(100vh-4rem)]">
       {/* Cabecera */}
       <div className="mb-5 flex items-start justify-between gap-4">
         <div className="flex items-start gap-4">
@@ -209,6 +231,9 @@ export default function AnalistaMercadoPage() {
         </div>
       </div>
 
+      <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+      {/* Columna izquierda: chat */}
+      <div className="flex min-h-[70vh] flex-col lg:min-h-0">
       {/* Conversación */}
       <div className="flex-1 overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6">
         {vista === 'historial' ? (
@@ -295,6 +320,19 @@ export default function AnalistaMercadoPage() {
                   {m.role === 'assistant' && !m.error
                     ? <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD}>{m.content}</ReactMarkdown>
                     : m.content}
+                  {m.role === 'assistant' && m.graficos?.length > 0 && (
+                    <button
+                      onClick={() => setSeleccion(i)}
+                      className={`mt-3 inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium cursor-pointer ${
+                        seleccion === i
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      <BarChart3 className="h-4 w-4" />
+                      {seleccion === i ? 'Gráfico a la derecha' : 'Ver gráfico'}
+                    </button>
+                  )}
                 </div>
                 {m.role === 'user' && (
                   <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-200">
@@ -340,6 +378,20 @@ export default function AnalistaMercadoPage() {
           <Send className="h-5 w-5" /> Preguntar
         </button>
       </form>
+      </div>
+
+      {/* Columna derecha: gráficos que complementan la respuesta (o panorama general) */}
+      <aside className="min-h-0 rounded-2xl bg-gray-100/70 p-4">
+        <PanelGraficos
+          modo={graficosRespuesta ? 'respuesta' : 'panorama'}
+          graficos={graficosRespuesta || panorama}
+          cargando={!graficosRespuesta && panorama === null}
+          hayRespuesta={ultimaIdx !== null}
+          onVerPanorama={() => setSeleccion(null)}
+          onVerRespuesta={() => setSeleccion(ultimaIdx)}
+        />
+      </aside>
+      </div>
     </div>
   )
 }

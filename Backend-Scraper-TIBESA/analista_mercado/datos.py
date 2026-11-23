@@ -244,7 +244,7 @@ def _ciudad_y_zona(d: Dict[str, Any]) -> tuple[str, str]:
         ciudad = "Otra ciudad"
 
     for fuente in (zona_campo, ubicacion):
-        partes = [_TIPO_EN.sub("", p.strip()) for p in fuente.split(",")]
+        partes = [re.sub(r"\b\d{5}\b", "", _TIPO_EN.sub("", p.strip())).strip() for p in fuente.split(",")]  # quita códigos postales
         partes = [p for p in partes if p and sin_acentos(p).rstrip(".") not in _NO_ZONA and not re.fullmatch(r"[\d\s-]+", p)]
         partes = [p for p in partes if not re.match(r"(?i)^(av\.?|avenida|calle|blvd\.?|boulevard|carretera|camino)\b", p)] or partes
         if partes:

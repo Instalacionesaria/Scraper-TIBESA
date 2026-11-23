@@ -59,15 +59,16 @@ from leads.routes import router as leads_router
 # Analista de Mercado (agente con herramientas sobre todas las propiedades)
 from analista_mercado import agente as analista_agente
 from analista_mercado import memoria as analista_memoria
+from analista_mercado import visualizaciones as analista_visualizaciones
 from analista_mercado.datos import obtener_inventario
 
 load_dotenv()
 
 # Versión visible en GET / — SUBIRLA en cada cambio del backend para saber,
 # abriendo la URL de la API, si EasyPanel ya desplegó lo último.
-API_VERSION = "3.3.2"
+API_VERSION = "3.4.0"
 API_ACTUALIZADO = "2026-11-23"
-API_NOVEDADES = "Analista: todos los precios con MXN (pesos mexicanos)"
+API_NOVEDADES = "Analista: panel de gráficos (respuesta + panorama general)"
 
 # Inicializar FastAPI
 app = FastAPI(
@@ -1251,13 +1252,23 @@ async def mercado_chat(req: MercadoChatRequest):
     if dueno and req.usuario and dueno != req.usuario:
         raise HTTPException(status_code=403, detail="Esta conversación pertenece a otro usuario.")
     try:
-        respuesta = await asyncio.to_thread(analista_agente.responder, thread_id, req.mensaje.strip(), req.usuario)
+        resultado = await asyncio.to_thread(analista_agente.responder, thread_id, req.mensaje.strip(), req.usuario)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=502, detail=f"Error del Analista de Mercado: {e}")
-    return {"response": respuesta, "thread_id": thread_id}
+    return {"response": resultado["texto"], "graficos": resultado["graficos"], "thread_id": thread_id}
+
+
+@app.get("/api/mercado/panorama")
+async def mercado_panorama():
+    """Panel de gráficos general del Analista (antes de la primera pregunta)."""
+    try:
+        return await asyncio.to_thread(analista_visualizaciones.panorama)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"No se pudo calcular el panorama: {e}")
 
 
 @app.get("/api/mercado/conversaciones")
@@ -1266,7 +1277,7 @@ async def mercado_conversaciones(usuario: str):
     hilos = await asyncio.to_thread(analista_memoria.listar_hilos, usuario)
 
     def _con_titulo(h):
-        mensajes = analista_agente.mensajes_de(h["thread_id"])
+        mensajes = analista_agente.mensajes_de(h["thread_id"], con_graficos=False)
         primera = next((m["content"] for m in mensajes if m["role"] == "user"), "")
         return {**h, "titulo": primera[:120], "preguntas": sum(1 for m in mensajes if m["role"] == "user")}
 

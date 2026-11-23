@@ -182,7 +182,8 @@ def estadisticas_mercado(
     """Calcula estadísticas de precios (en MXN) sobre todas las propiedades que cumplen los filtros:
     mediana, promedio, rango típico (25%-75%), mínimo y máximo del PRECIO TOTAL y del PRECIO POR m².
     - zona: texto a buscar en la zona/ubicación; para COMPARAR varias zonas sepáralas con comas
-      (p. ej. "Cerritos, Marina, El Cid") y usa agrupar_por="zona".
+      (p. ej. "Cerritos, Marina, El Cid") y usa agrupar_por="zona": cada zona pedida es un grupo
+      que reúne sus subzonas (Cerritos incluye Sábalo Cerritos y Cerritos al Mar).
     - agrupar_por: "zona" para ranking por zona, "tipo", "portal" o "recamaras". Sin agrupar devuelve un solo bloque.
     - min_propiedades: grupos con menos propiedades se omiten (poco representativos).
     - incluir_grandes_extensiones: por defecto se EXCLUYEN terrenos de 1 hectárea o más (ranchos, terrenos rústicos,
@@ -220,9 +221,15 @@ def estadisticas_mercado(
         salida["resultado"] = bloque(con_precio)
         return _json(salida)
 
+    # Si pidió comparar zonas concretas ("Cerritos, Marina, El Cid"), se agrupa por ESAS zonas:
+    # "Cerritos" reúne Sábalo Cerritos, Cerritos al Mar, etc. (si no, cada subzona sería una fila).
+    terminos = [z.strip() for z in (zona or "").split(",") if z.strip()]
     grupos: Dict[str, List[Propiedad]] = {}
     for p in con_precio:
-        if agrupar_por == "zona":
+        if agrupar_por == "zona" and len(terminos) > 1:
+            texto = sin_acentos(f"{p.zona} {p.ubicacion}")
+            clave = next((t for t in terminos if sin_acentos(t) in texto), p.zona)
+        elif agrupar_por == "zona":
             clave = p.zona
         elif agrupar_por == "tipo":
             clave = p.tipo

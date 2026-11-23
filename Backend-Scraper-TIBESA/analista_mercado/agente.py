@@ -19,6 +19,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from .herramientas import HERRAMIENTAS
 from .memoria import obtener_checkpointer
+from .visualizaciones import graficos_de_turno, graficos_por_respuesta
 from utils.zona_horaria import ahora_mazatlan
 
 
@@ -82,22 +83,29 @@ def _texto(mensaje) -> str:
     return str(contenido or "")
 
 
-def responder(thread_id: str, mensaje: str, usuario: Optional[str] = None) -> str:
-    """Agrega la pregunta a la conversación `thread_id` y devuelve la respuesta final."""
+def responder(thread_id: str, mensaje: str, usuario: Optional[str] = None) -> Dict[str, Any]:
+    """Agrega la pregunta a la conversación `thread_id`; devuelve la respuesta final y sus gráficos."""
     resultado = _obtener_agente().invoke(
         {"messages": [{"role": "user", "content": mensaje}]},
         config=_config(thread_id, usuario),
     )
-    return _texto(resultado["messages"][-1])
+    mensajes = resultado["messages"]
+    inicio = max(i for i, m in enumerate(mensajes) if isinstance(m, HumanMessage))
+    return {"texto": _texto(mensajes[-1]), "graficos": graficos_de_turno(mensajes[inicio + 1:])}
 
 
-def mensajes_de(thread_id: str) -> List[Dict[str, str]]:
-    """Conversación visible (preguntas y respuestas finales, sin pasos internos de herramientas)."""
+def mensajes_de(thread_id: str, con_graficos: bool = True) -> List[Dict[str, Any]]:
+    """Conversación visible (preguntas y respuestas finales, sin pasos internos de herramientas),
+    con los gráficos de cada respuesta para el panel derecho."""
     estado = _obtener_agente().get_state(_config(thread_id))
-    salida = []
-    for m in (estado.values or {}).get("messages", []):
+    todos = (estado.values or {}).get("messages", [])
+    graficos = iter(graficos_por_respuesta(todos)) if con_graficos else None
+    salida: List[Dict[str, Any]] = []
+    for m in todos:
         if isinstance(m, HumanMessage):
             salida.append({"role": "user", "content": _texto(m)})
-        elif isinstance(m, AIMessage) and not m.tool_calls and _texto(m).strip():
-            salida.append({"role": "assistant", "content": _texto(m)})
+        elif isinstance(m, AIMessage) and not m.tool_calls:
+            g = next(graficos, []) if graficos else []
+            if _texto(m).strip():
+                salida.append({"role": "assistant", "content": _texto(m), "graficos": g})
     return salida

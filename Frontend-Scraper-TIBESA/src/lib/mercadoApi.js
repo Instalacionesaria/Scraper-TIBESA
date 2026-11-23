@@ -16,7 +16,12 @@ export function getResumenMercado() {
   return request('/api/mercado/resumen')
 }
 
-// → { response, thread_id }
+// → { graficos: [...] } panel general antes de preguntar
+export function getPanorama() {
+  return request('/api/mercado/panorama')
+}
+
+// → { response, graficos, thread_id }
 export function askAnalistaMercado({ threadId, mensaje, usuario }) {
   return request('/api/mercado/chat', {
     method: 'POST',

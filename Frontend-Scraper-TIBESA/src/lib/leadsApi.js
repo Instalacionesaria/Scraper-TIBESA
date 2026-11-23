@@ -76,6 +76,11 @@ export function askBusquedaLeadsAssistant({ messages, current }) {
   return post('/api/leads/google-places/asistente', { messages, current })
 }
 
+// Chat IA que arma la URL de la Biblioteca de Anuncios de Facebook y la etiqueta del CRM.
+export function askFacebookAssistant({ messages, current }) {
+  return post('/api/leads/facebook/asistente', { messages, current })
+}
+
 export function startFacebookPages({ pages, credentials }) {
   return post('/api/leads/facebook/pages/start', {
     pages,

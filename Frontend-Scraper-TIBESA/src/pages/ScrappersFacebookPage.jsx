@@ -11,6 +11,7 @@ import {
 } from '../lib/leadsApi'
 import { downloadCsv } from '../lib/csv'
 import LeadsTable from '../components/LeadsTable'
+import FacebookAssistant from '../components/FacebookAssistant'
 
 const MAX_ETIQUETA_LEN = 30
 
@@ -246,6 +247,15 @@ export default function ScrappersFacebookPage() {
             </div>
           </div>
         </div>
+
+        <FacebookAssistant
+          current={{ urlBiblioteca, etiqueta }}
+          disabled={statusAds === 'running' || statusPages === 'running'}
+          onApply={(c) => {
+            if (c.urlBiblioteca !== undefined) setUrlBiblioteca(c.urlBiblioteca)
+            if (c.etiqueta !== undefined) setEtiqueta(c.etiqueta.slice(0, MAX_ETIQUETA_LEN))
+          }}
+        />
 
         {statusAds === 'done' && adsPages.length > 0 && statusPages !== 'done' && (
           <LeadsTable rows={adsPages} title={`Páginas detectadas (${adsPages.length})`} />

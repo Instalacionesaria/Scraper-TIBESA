@@ -10,6 +10,7 @@ import { Sparkles, Send, Loader2, Bot, User, CheckCircle2 } from 'lucide-react'
 //   current                     → valores actuales del formulario
 //   onApply(applied)            → actualiza el formulario con los campos sugeridos
 //   greeting, suggestions, placeholder, disabled
+//   hiddenKeys                  → claves que se aplican al formulario pero no se muestran como chip (p. ej. una URL larga)
 export default function FormAssistant({
   ask,
   mapCampos,
@@ -20,6 +21,7 @@ export default function FormAssistant({
   suggestions = [],
   placeholder = 'Escribe lo que buscas…',
   disabled = false,
+  hiddenKeys = [],
 }) {
   const [messages, setMessages] = useState([{ role: 'assistant', content: greeting, local: true }])
   const [input, setInput] = useState('')
@@ -104,7 +106,7 @@ export default function FormAssistant({
               </div>
               {msg.applied && Object.keys(msg.applied).length > 0 && (
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {Object.entries(msg.applied).map(([k, v]) => (
+                  {Object.entries(msg.applied).filter(([k]) => !hiddenKeys.includes(k)).map(([k, v]) => (
                     <span
                       key={k}
                       className="inline-flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full"

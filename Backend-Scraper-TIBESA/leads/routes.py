@@ -21,7 +21,7 @@ from apify_client import ApifyClient
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel
 
-from . import asistente_busqueda_leads, asistente_linkedin, crm_tibesa, facebook_ads, facebook_pages, google_places, linkedin_scraper, sistema_leads
+from . import asistente_busqueda_leads, asistente_facebook, asistente_linkedin, crm_tibesa, facebook_ads, facebook_pages, google_places, linkedin_scraper, sistema_leads
 from .asistente_ia import MensajeChat
 from .models import (
     ApifyWebhookPayload,
@@ -247,6 +247,12 @@ async def asistente_linkedin_chat(request: AsistenteRequest) -> Dict[str, Any]:
 async def asistente_busqueda_leads_chat(request: AsistenteRequest) -> Dict[str, Any]:
     """Chat con IA que ayuda a llenar los campos de Búsqueda de Leads (no lanza el scrapeo)."""
     return await _correr_asistente(asistente_busqueda_leads.responder, request)
+
+
+@router.post("/facebook/asistente")
+async def asistente_facebook_chat(request: AsistenteRequest) -> Dict[str, Any]:
+    """Chat con IA que arma la URL de la Biblioteca de Anuncios y la etiqueta del CRM (no lanza el scrapeo)."""
+    return await _correr_asistente(asistente_facebook.responder, request)
 
 
 # ============================================================================

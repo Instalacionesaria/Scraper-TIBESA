@@ -18,6 +18,7 @@ import random
 from pathlib import Path
 from datetime import datetime
 import asyncio
+import traceback
 from dotenv import load_dotenv
 
 from langchain.chat_models import init_chat_model
@@ -55,13 +56,17 @@ from brochure.generator import generar_brochure
 # Módulo de Leads (Google Places, Facebook Ads/Pages, CRM TIBESA)
 from leads.routes import router as leads_router
 
+# Analista de Mercado (agente con herramientas sobre todas las propiedades)
+from analista_mercado import agente as analista_agente
+from analista_mercado.datos import obtener_inventario
+
 load_dotenv()
 
 # Versión visible en GET / — SUBIRLA en cada cambio del backend para saber,
 # abriendo la URL de la API, si EasyPanel ya desplegó lo último.
-API_VERSION = "3.1.0"
-API_ACTUALIZADO = "2026-11-22"
-API_NOVEDADES = "Chat IA en el scraper de Facebook"
+API_VERSION = "3.2.0"
+API_ACTUALIZADO = "2026-11-23"
+API_NOVEDADES = "Analista de Mercado (agente sobre todas las propiedades)"
 
 # Inicializar FastAPI
 app = FastAPI(
@@ -1198,6 +1203,45 @@ INSTRUCCIONES:
         return {"response": response.content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error del LLM: {str(e)}")
+
+
+# ========================================
+# ANALISTA DE MERCADO (agente sobre TODAS las propiedades)
+# ========================================
+
+class MercadoChatRequest(BaseModel):
+    messages: List[analista_agente.MensajeChat]
+
+
+@app.get("/api/mercado/resumen")
+async def mercado_resumen():
+    """Cuántas propiedades analiza el agente y hasta qué fecha (para la cabecera de la página)."""
+    try:
+        props = await asyncio.to_thread(obtener_inventario)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"No se pudieron leer las propiedades: {e}")
+    unicas = [p for p in props if not p.duplicado]
+    fechas = sorted(p.actualizado for p in props if p.actualizado)
+    return {
+        "propiedades": len(unicas),
+        "portales": len({p.portal for p in unicas}),
+        "actualizado": fechas[-1] if fechas else None,
+    }
+
+
+@app.post("/api/mercado/chat")
+async def mercado_chat(req: MercadoChatRequest):
+    """Chat con el Analista de Mercado: agente con herramientas de análisis sobre todos los portales."""
+    if not req.messages or req.messages[-1].role != "user":
+        raise HTTPException(status_code=400, detail="El último mensaje debe ser del usuario.")
+    try:
+        respuesta = await asyncio.to_thread(analista_agente.responder, req.messages)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=502, detail=f"Error del Analista de Mercado: {e}")
+    return {"response": respuesta}
 
 
 # ========================================

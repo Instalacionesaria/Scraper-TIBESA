@@ -9,8 +9,9 @@ jinja2>=3.1.0
 folium>=0.15.0
 
 # LangChain + OpenAI para procesamiento IA
-langchain>=0.3.0
-langchain-core>=0.3.0
+# >=1.0: el Analista de Mercado usa langchain.agents.create_agent
+langchain>=1.0
+langchain-core>=1.0
 langchain-openai>=0.3.0
 python-dotenv==1.0.0
 

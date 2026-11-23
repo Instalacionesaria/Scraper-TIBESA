@@ -103,6 +103,12 @@ def upsert_propiedades(fuente: str, propiedades: List[Dict[str, Any]]) -> int:
             print(f"❌ Excepción guardando propiedades ({fuente}): {e}")
 
     print(f"💾 {enviadas}/{len(rows)} propiedades de '{fuente}' guardadas en Supabase")
+    if enviadas:
+        try:  # el Analista de Mercado debe ver los datos nuevos sin esperar a que venza su caché
+            from analista_mercado.datos import invalidar_cache
+            invalidar_cache()
+        except Exception as e:
+            print(f"⚠️ No se pudo invalidar el caché del Analista de Mercado: {e}")
     return enviadas
 
 

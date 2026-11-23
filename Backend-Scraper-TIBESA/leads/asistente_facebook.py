@@ -8,7 +8,9 @@ URL de la Biblioteca de Anuncios de Facebook (no la arma el LLM, para que siempr
 sea válida). NUNCA lanza el scrapeo: solo llena los campos.
 """
 
+from datetime import datetime
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from pydantic import BaseModel, Field
@@ -18,6 +20,7 @@ from .asistente_ia import MensajeChat, invocar_estructurado
 
 BASE_URL_BIBLIOTECA = "https://www.facebook.com/ads/library/"
 MAX_ETIQUETA_LEN = 30
+MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
 SYSTEM_PROMPT = """Eres el asistente de "Scrappers de Facebook" de TIBESA Bienes Raíces (Mazatlán, Sinaloa, México).
 Esta herramienta busca en la Biblioteca de Anuncios de Facebook a los NEGOCIOS/PÁGINAS que están pagando anuncios
@@ -36,7 +39,8 @@ CAMPOS QUE DEBES DEFINIR:
 - solo_activos (opcional, true/false): true = solo anuncios que están corriendo ahora (negocios activos, recomendado);
   false = también anuncios viejos. Si no lo menciona, déjalo en null (por defecto se usan solo activos).
 - etiqueta (opcional): nombre corto para identificar estos leads en el CRM de TIBESA, MÁXIMO 30 caracteres.
-  Ej: "FB Inmobiliarias MX - Nov 2026". Propónla tú cuando ya tengas palabra clave y país, si está vacía.
+  Si pones mes o año, usa la FECHA DE HOY (abajo), nunca otro año. Ej: "FB Inmobiliarias MX - {mes_anio}".
+  Propónla tú cuando ya tengas palabra clave y país, si está vacía.
 
 REGLAS:
 - En `campos` devuelve SOLO los campos que quieras poner o cambiar; deja en null los que no cambian.
@@ -49,6 +53,8 @@ REGLAS:
 - Una palabra clave muy específica puede dar pocos anunciantes; para más volumen sugiere una más general.
 - Si el usuario pega una URL de la Biblioteca de Anuncios, dígale que ya puede usarla tal cual y no cambie nada.
 - Si preguntan algo fuera de este formulario, redirige amablemente a la búsqueda de anunciantes.
+
+FECHA DE HOY: {hoy}
 
 VALORES ACTUALES DEL FORMULARIO:
 {valores_actuales}
@@ -123,7 +129,10 @@ def responder(mensajes: List[MensajeChat], valores_actuales: dict) -> RespuestaA
         f"- pais (según la URL): {previo.get('pais') or '(vacío)'}",
         f"- etiqueta: {etiqueta_actual or '(vacío)'}",
     ])
-    resultado = invocar_estructurado(SYSTEM_PROMPT.format(valores_actuales=valores_txt), RespuestaLLM, mensajes)
+    ahora = datetime.now(ZoneInfo("America/Mazatlan"))
+    mes_anio = f"{MESES[ahora.month - 1]} {ahora.year}"
+    prompt = SYSTEM_PROMPT.format(valores_actuales=valores_txt, hoy=ahora.strftime("%d/%m/%Y"), mes_anio=mes_anio)
+    resultado = invocar_estructurado(prompt, RespuestaLLM, mensajes)
     c = resultado.campos
 
     # Combinamos lo nuevo con lo que ya había y armamos la URL nosotros.

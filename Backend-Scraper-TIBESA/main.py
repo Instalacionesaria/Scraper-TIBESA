@@ -58,15 +58,16 @@ from leads.routes import router as leads_router
 
 # Analista de Mercado (agente con herramientas sobre todas las propiedades)
 from analista_mercado import agente as analista_agente
+from analista_mercado import memoria as analista_memoria
 from analista_mercado.datos import obtener_inventario
 
 load_dotenv()
 
 # Versión visible en GET / — SUBIRLA en cada cambio del backend para saber,
 # abriendo la URL de la API, si EasyPanel ya desplegó lo último.
-API_VERSION = "3.2.0"
+API_VERSION = "3.3.0"
 API_ACTUALIZADO = "2026-11-23"
-API_NOVEDADES = "Analista de Mercado (agente sobre todas las propiedades)"
+API_NOVEDADES = "Analista de Mercado con histórico de conversaciones (esquema tibesa)"
 
 # Inicializar FastAPI
 app = FastAPI(
@@ -1210,7 +1211,16 @@ INSTRUCCIONES:
 # ========================================
 
 class MercadoChatRequest(BaseModel):
-    messages: List[analista_agente.MensajeChat]
+    thread_id: str               # id de la conversación (lo genera el frontend)
+    mensaje: str                 # pregunta nueva; el histórico lo guarda el checkpointer
+    usuario: Optional[str] = None  # correo del usuario: permite listar sus conversaciones
+
+
+def _validar_thread_id(thread_id: str) -> str:
+    thread_id = (thread_id or "").strip()
+    if not thread_id or len(thread_id) > 100:
+        raise HTTPException(status_code=400, detail="thread_id inválido.")
+    return thread_id
 
 
 @app.get("/api/mercado/resumen")
@@ -1226,22 +1236,62 @@ async def mercado_resumen():
         "propiedades": len(unicas),
         "portales": len({p.portal for p in unicas}),
         "actualizado": fechas[-1] if fechas else None,
+        "historico": await asyncio.to_thread(analista_memoria.estado_memoria),
     }
 
 
 @app.post("/api/mercado/chat")
 async def mercado_chat(req: MercadoChatRequest):
-    """Chat con el Analista de Mercado: agente con herramientas de análisis sobre todos los portales."""
-    if not req.messages or req.messages[-1].role != "user":
-        raise HTTPException(status_code=400, detail="El último mensaje debe ser del usuario.")
+    """Chat con el Analista de Mercado (agente con herramientas sobre todos los portales).
+    La conversación se guarda en el checkpointer bajo `thread_id`."""
+    thread_id = _validar_thread_id(req.thread_id)
+    if not req.mensaje.strip():
+        raise HTTPException(status_code=400, detail="Escriba una pregunta.")
+    dueno = await asyncio.to_thread(analista_memoria.dueno_del_hilo, thread_id)
+    if dueno and req.usuario and dueno != req.usuario:
+        raise HTTPException(status_code=403, detail="Esta conversación pertenece a otro usuario.")
     try:
-        respuesta = await asyncio.to_thread(analista_agente.responder, req.messages)
+        respuesta = await asyncio.to_thread(analista_agente.responder, thread_id, req.mensaje.strip(), req.usuario)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=502, detail=f"Error del Analista de Mercado: {e}")
-    return {"response": respuesta}
+    return {"response": respuesta, "thread_id": thread_id}
+
+
+@app.get("/api/mercado/conversaciones")
+async def mercado_conversaciones(usuario: str):
+    """Conversaciones anteriores del usuario: id, fecha y primera pregunta (como título)."""
+    hilos = await asyncio.to_thread(analista_memoria.listar_hilos, usuario)
+
+    def _con_titulo(h):
+        mensajes = analista_agente.mensajes_de(h["thread_id"])
+        primera = next((m["content"] for m in mensajes if m["role"] == "user"), "")
+        return {**h, "titulo": primera[:120], "preguntas": sum(1 for m in mensajes if m["role"] == "user")}
+
+    return {"conversaciones": await asyncio.to_thread(lambda: [_con_titulo(h) for h in hilos])}
+
+
+@app.get("/api/mercado/conversaciones/{thread_id}")
+async def mercado_conversacion(thread_id: str, usuario: Optional[str] = None):
+    """Mensajes de una conversación (para retomarla)."""
+    thread_id = _validar_thread_id(thread_id)
+    dueno = await asyncio.to_thread(analista_memoria.dueno_del_hilo, thread_id)
+    if dueno and usuario and dueno != usuario:
+        raise HTTPException(status_code=403, detail="Esta conversación pertenece a otro usuario.")
+    return {"thread_id": thread_id, "mensajes": await asyncio.to_thread(analista_agente.mensajes_de, thread_id)}
+
+
+@app.delete("/api/mercado/conversaciones/{thread_id}")
+async def mercado_borrar_conversacion(thread_id: str, usuario: Optional[str] = None):
+    """Borra una conversación del histórico."""
+    thread_id = _validar_thread_id(thread_id)
+    dueno = await asyncio.to_thread(analista_memoria.dueno_del_hilo, thread_id)
+    if dueno and dueno != usuario:
+        raise HTTPException(status_code=403, detail="Esta conversación pertenece a otro usuario.")
+    await asyncio.to_thread(analista_memoria.borrar_hilo, thread_id)
+    return {"ok": True}
 
 
 # ========================================

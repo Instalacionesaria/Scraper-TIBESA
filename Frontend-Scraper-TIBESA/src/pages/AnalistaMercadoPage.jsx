@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { LineChart, Send, Loader2, Bot, User, RotateCcw } from 'lucide-react'
-import { askAnalistaMercado, getResumenMercado } from '../lib/mercadoApi'
+import { LineChart, Send, Loader2, Bot, User, RotateCcw, History, Trash2, ArrowLeft, MessageSquare } from 'lucide-react'
+import { getCredentials } from '../lib/auth'
+import {
+  askAnalistaMercado, borrarConversacion, getConversacion, getResumenMercado, listarConversaciones,
+} from '../lib/mercadoApi'
 
-const STORAGE_KEY = 'analista-mercado-conversacion'
+// Solo guardamos el id de la conversación actual; los mensajes viven en el backend (checkpointer).
+const THREAD_KEY = 'analista-mercado-thread'
 
 const SUGERENCIAS = [
   '¿Cuánto cuesta el m² de terreno en cada zona de Mazatlán?',
@@ -34,13 +38,32 @@ const MD = {
   td: (props) => <td className="border-t border-gray-100 px-3 py-2 align-top" {...props} />,
 }
 
-function cargarConversacion() {
+function nuevoId() {
+  return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function leerThread() {
   try {
-    const guardada = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || '[]')
-    return Array.isArray(guardada) ? guardada : []
+    return localStorage.getItem(THREAD_KEY)
   } catch {
-    return []
+    return null
   }
+}
+
+function guardarThread(id) {
+  try {
+    localStorage.setItem(THREAD_KEY, id)
+  } catch {
+    // sin almacenamiento: la conversación sigue guardada en el servidor, solo no se reabre sola
+  }
+}
+
+function formatearFechaHora(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime())
+    ? ''
+    : d.toLocaleString('es-MX', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
 }
 
 function formatearFecha(iso) {
@@ -50,10 +73,15 @@ function formatearFecha(iso) {
 }
 
 export default function AnalistaMercadoPage() {
-  const [mensajes, setMensajes] = useState(cargarConversacion)
+  const usuario = getCredentials()?.correo_electronico || null
+  const [threadId, setThreadId] = useState(() => leerThread() || nuevoId())
+  const [mensajes, setMensajes] = useState([])
+  const [cargando, setCargando] = useState(true)
   const [input, setInput] = useState('')
   const [pensando, setPensando] = useState(false)
   const [resumen, setResumen] = useState(null)
+  const [vista, setVista] = useState('chat') // chat | historial
+  const [historial, setHistorial] = useState(null)
   const finRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -61,24 +89,57 @@ export default function AnalistaMercadoPage() {
     getResumenMercado().then(setResumen).catch(() => setResumen(null))
   }, [])
 
+  // Al entrar, retomar la última conversación guardada en el servidor.
   useEffect(() => {
-    try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(mensajes))
-    } catch {
-      // sin almacenamiento disponible: la conversación solo vive en esta pestaña
-    }
+    guardarThread(threadId)
+    let activo = true
+    setCargando(true)
+    getConversacion(threadId, usuario)
+      .then((c) => { if (activo) setMensajes(c.mensajes || []) })
+      .catch(() => { if (activo) setMensajes([]) })
+      .finally(() => { if (activo) setCargando(false) })
+    return () => { activo = false }
+  }, [threadId, usuario])
+
+  useEffect(() => {
     finRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [mensajes, pensando])
+
+  const abrirHistorial = async () => {
+    setVista('historial')
+    setHistorial(null)
+    try {
+      const { conversaciones } = await listarConversaciones(usuario)
+      setHistorial(conversaciones || [])
+    } catch {
+      setHistorial([])
+    }
+  }
+
+  const abrirConversacion = (id) => {
+    setThreadId(id)
+    setVista('chat')
+  }
+
+  const eliminarConversacion = async (id) => {
+    if (!window.confirm('¿Seguro que desea borrar esta conversación? No se puede recuperar.')) return
+    try {
+      await borrarConversacion(id, usuario)
+      setHistorial((prev) => (prev || []).filter((c) => c.thread_id !== id))
+      if (id === threadId) setThreadId(nuevoId())
+    } catch (e) {
+      window.alert(`No se pudo borrar: ${e.message}`)
+    }
+  }
 
   const preguntar = async (texto) => {
     const pregunta = (texto ?? input).trim()
     if (!pregunta || pensando) return
-    const historial = [...mensajes, { role: 'user', content: pregunta }]
-    setMensajes(historial)
+    setMensajes((prev) => [...prev, { role: 'user', content: pregunta }])
     setInput('')
     setPensando(true)
     try {
-      const { response } = await askAnalistaMercado(historial.filter((m) => !m.error))
+      const { response } = await askAnalistaMercado({ threadId, mensaje: pregunta, usuario })
       setMensajes((prev) => [...prev, { role: 'assistant', content: response }])
     } catch (e) {
       setMensajes((prev) => [
@@ -92,8 +153,10 @@ export default function AnalistaMercadoPage() {
   }
 
   const nuevaConversacion = () => {
+    setThreadId(nuevoId())
     setMensajes([])
     setInput('')
+    setVista('chat')
     inputRef.current?.focus()
   }
 
@@ -117,20 +180,80 @@ export default function AnalistaMercadoPage() {
             </p>
           </div>
         </div>
-        {!vacia && (
-          <button
-            onClick={nuevaConversacion}
-            disabled={pensando}
-            className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-base font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
-          >
-            <RotateCcw className="h-5 w-5" /> Nueva conversación
-          </button>
-        )}
+        <div className="flex shrink-0 gap-2">
+          {vista === 'chat' ? (
+            <button
+              onClick={abrirHistorial}
+              disabled={pensando}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-base font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+            >
+              <History className="h-5 w-5" /> Conversaciones anteriores
+            </button>
+          ) : (
+            <button
+              onClick={() => setVista('chat')}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-base font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              <ArrowLeft className="h-5 w-5" /> Volver a la conversación
+            </button>
+          )}
+          {(!vacia || vista === 'historial') && (
+            <button
+              onClick={nuevaConversacion}
+              disabled={pensando}
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2.5 text-base font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 cursor-pointer"
+            >
+              <RotateCcw className="h-5 w-5" /> Nueva conversación
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Conversación */}
       <div className="flex-1 overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6">
-        {vacia ? (
+        {vista === 'historial' ? (
+          <div>
+            <p className="mb-4 text-lg font-semibold text-gray-800">Sus conversaciones anteriores</p>
+            {historial === null ? (
+              <div className="inline-flex items-center gap-2 text-base text-gray-600">
+                <Loader2 className="h-5 w-5 animate-spin text-emerald-600" /> Cargando…
+              </div>
+            ) : historial.length === 0 ? (
+              <p className="text-base text-gray-600">Todavía no tiene conversaciones guardadas.</p>
+            ) : (
+              <ul className="space-y-3">
+                {historial.map((c) => (
+                  <li key={c.thread_id} className={`flex items-stretch gap-2 rounded-xl border ${c.thread_id === threadId ? 'border-emerald-300 bg-emerald-50' : 'border-gray-200 bg-white'}`}>
+                    <button
+                      onClick={() => abrirConversacion(c.thread_id)}
+                      className="flex flex-1 items-start gap-3 px-4 py-3.5 text-left hover:bg-gray-50 rounded-l-xl cursor-pointer"
+                    >
+                      <MessageSquare className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" />
+                      <span>
+                        <span className="block text-base font-medium text-gray-900">{c.titulo || '(sin preguntas)'}</span>
+                        <span className="block text-sm text-gray-500">
+                          {formatearFechaHora(c.actualizado)} · {c.preguntas} {c.preguntas === 1 ? 'pregunta' : 'preguntas'}
+                        </span>
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => eliminarConversacion(c.thread_id)}
+                      aria-label="Borrar conversación"
+                      title="Borrar conversación"
+                      className="px-4 text-gray-400 hover:text-red-600 cursor-pointer"
+                    >
+                      <Trash2 className="h-5 w-5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : cargando ? (
+          <div className="inline-flex items-center gap-2 text-base text-gray-600">
+            <Loader2 className="h-5 w-5 animate-spin text-emerald-600" /> Cargando su conversación…
+          </div>
+        ) : vacia ? (
           <div>
             <p className="mb-2 text-lg font-semibold text-gray-800">¿Qué le gustaría saber del mercado?</p>
             <p className="mb-5 text-base text-gray-600">
@@ -205,13 +328,13 @@ export default function AnalistaMercadoPage() {
           ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          disabled={pensando}
+          disabled={pensando || vista === 'historial'}
           placeholder="Escriba aquí su pregunta. Ej: ¿Cuánto cuesta un departamento en la Zona Dorada?"
           className="flex-1 rounded-xl border border-gray-300 bg-white px-5 py-4 text-base focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-400 disabled:bg-gray-50"
         />
         <button
           type="submit"
-          disabled={!input.trim() || pensando}
+          disabled={!input.trim() || pensando || vista === 'historial'}
           className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-4 text-base font-semibold text-white hover:bg-emerald-700 disabled:bg-gray-300 cursor-pointer"
         >
           <Send className="h-5 w-5" /> Preguntar

@@ -13,6 +13,9 @@ folium>=0.15.0
 langchain>=1.0
 langchain-core>=1.0
 langchain-openai>=0.3.0
+# Histórico del Analista de Mercado (checkpointer en Postgres/Supabase, esquema tibesa)
+langgraph-checkpoint-postgres>=3.0
+psycopg[binary,pool]>=3.2
 python-dotenv==1.0.0
 
 # Módulo de Leads (Google Places, Facebook Ads/Pages, CRM TIBESA)

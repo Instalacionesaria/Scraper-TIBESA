@@ -1,4 +1,5 @@
 // API del Analista de Mercado (agente sobre TODAS las propiedades guardadas).
+// El histórico de cada conversación lo guarda el backend (checkpointer) bajo un thread_id.
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 async function request(path, options) {
@@ -8,16 +9,32 @@ async function request(path, options) {
   return data
 }
 
-// { propiedades, portales, actualizado }
+const q = (usuario) => (usuario ? `?usuario=${encodeURIComponent(usuario)}` : '')
+
+// { propiedades, portales, actualizado, historico: { modo, detalle } }
 export function getResumenMercado() {
   return request('/api/mercado/resumen')
 }
 
-// messages: [{ role: 'user'|'assistant', content }] → { response }
-export function askAnalistaMercado(messages) {
+// → { response, thread_id }
+export function askAnalistaMercado({ threadId, mensaje, usuario }) {
   return request('/api/mercado/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ thread_id: threadId, mensaje, usuario }),
   })
+}
+
+// → { conversaciones: [{ thread_id, actualizado, titulo, preguntas }] }
+export function listarConversaciones(usuario) {
+  return request(`/api/mercado/conversaciones${q(usuario)}`)
+}
+
+// → { thread_id, mensajes: [{ role, content }] }
+export function getConversacion(threadId, usuario) {
+  return request(`/api/mercado/conversaciones/${encodeURIComponent(threadId)}${q(usuario)}`)
+}
+
+export function borrarConversacion(threadId, usuario) {
+  return request(`/api/mercado/conversaciones/${encodeURIComponent(threadId)}${q(usuario)}`, { method: 'DELETE' })
 }

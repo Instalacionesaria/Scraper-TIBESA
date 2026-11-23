@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { LineChart, Send, Loader2, Bot, User, RotateCcw, History, Trash2, ArrowLeft, MessageSquare, BarChart3 } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { LineChart, Send, Loader2, Bot, User, RotateCcw, History, Trash2, ArrowLeft, MessageSquare, BarChart3, FileDown, CheckCircle2, X } from 'lucide-react'
 import PanelGraficos from '../components/PanelGraficos'
 import { getCredentials } from '../lib/auth'
 import {
-  askAnalistaMercado, borrarConversacion, getConversacion, getPanorama, getResumenMercado, listarConversaciones,
+  askAnalistaMercado, borrarConversacion, descargarArchivo, generarInforme, getConversacion, getPanorama,
+  getResumenMercado, listarConversaciones,
 } from '../lib/mercadoApi'
 
 // Solo guardamos el id de la conversación actual; los mensajes viven en el backend (checkpointer).
@@ -85,6 +87,7 @@ export default function AnalistaMercadoPage() {
   const [historial, setHistorial] = useState(null)
   const [panorama, setPanorama] = useState(null) // gráficos generales
   const [seleccion, setSeleccion] = useState(null) // índice del mensaje cuyos gráficos se ven; null = panorama
+  const [informe, setInforme] = useState({ estado: 'idle' }) // idle | generando | listo | error
   const finRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -175,12 +178,25 @@ export default function AnalistaMercadoPage() {
     setThreadId(nuevoId())
     setMensajes([])
     setSeleccion(null)
+    setInforme({ estado: 'idle' })
     setInput('')
     setVista('chat')
     inputRef.current?.focus()
   }
 
+  const descargarInforme = async () => {
+    setInforme({ estado: 'generando' })
+    try {
+      const meta = await generarInforme({ threadId, usuario })
+      descargarArchivo(meta.download_url)
+      setInforme({ estado: 'listo', meta })
+    } catch (e) {
+      setInforme({ estado: 'error', mensaje: e.message })
+    }
+  }
+
   const fecha = formatearFecha(resumen?.actualizado)
+  const hayRespuestas = mensajes.some((m) => m.role === 'assistant' && !m.error)
   const vacia = mensajes.length === 0
   const graficosRespuesta = seleccion !== null ? mensajes[seleccion]?.graficos : null
   const ultimaIdx = ultimaConGraficos(mensajes)
@@ -202,7 +218,19 @@ export default function AnalistaMercadoPage() {
             </p>
           </div>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          {vista === 'chat' && hayRespuestas && (
+            <button
+              onClick={descargarInforme}
+              disabled={pensando || informe.estado === 'generando'}
+              title="Arma un informe en PDF con lo conversado y sus gráficos"
+              className="inline-flex items-center gap-2 rounded-xl bg-[#0B2545] px-4 py-2.5 text-base font-medium text-white hover:bg-[#13315C] disabled:opacity-60 cursor-pointer"
+            >
+              {informe.estado === 'generando'
+                ? <><Loader2 className="h-5 w-5 animate-spin" /> Preparando su informe…</>
+                : <><FileDown className="h-5 w-5" /> Descargar informe (PDF)</>}
+            </button>
+          )}
           {vista === 'chat' ? (
             <button
               onClick={abrirHistorial}
@@ -230,6 +258,34 @@ export default function AnalistaMercadoPage() {
           )}
         </div>
       </div>
+
+      {informe.estado === 'listo' && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-base text-emerald-900">
+          <span className="inline-flex items-center gap-2">
+            <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
+            <span>
+              Su informe <strong>«{informe.meta.titulo}»</strong> se descargó. También quedó guardado en{' '}
+              <Link to="/resultados" className="font-semibold underline">Resultados</Link>.
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            <button onClick={() => descargarArchivo(informe.meta.download_url)} className="rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-emerald-100 cursor-pointer">
+              Descargar de nuevo
+            </button>
+            <button onClick={() => setInforme({ estado: 'idle' })} aria-label="Cerrar aviso" className="rounded-full p-1 text-emerald-700 hover:bg-emerald-100 cursor-pointer">
+              <X className="h-5 w-5" />
+            </button>
+          </span>
+        </div>
+      )}
+      {informe.estado === 'error' && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-base text-red-800">
+          <span>No se pudo preparar el informe ({informe.mensaje}). Por favor, intente de nuevo.</span>
+          <button onClick={() => setInforme({ estado: 'idle' })} aria-label="Cerrar aviso" className="rounded-full p-1 hover:bg-red-100 cursor-pointer">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+      )}
 
       <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
       {/* Columna izquierda: chat */}

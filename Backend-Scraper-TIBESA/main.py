@@ -60,15 +60,16 @@ from leads.routes import router as leads_router
 from analista_mercado import agente as analista_agente
 from analista_mercado import memoria as analista_memoria
 from analista_mercado import visualizaciones as analista_visualizaciones
+from analista_mercado import informe as analista_informe
 from analista_mercado.datos import obtener_inventario
 
 load_dotenv()
 
 # Versión visible en GET / — SUBIRLA en cada cambio del backend para saber,
 # abriendo la URL de la API, si EasyPanel ya desplegó lo último.
-API_VERSION = "3.4.0"
+API_VERSION = "3.5.0"
 API_ACTUALIZADO = "2026-11-23"
-API_NOVEDADES = "Analista: panel de gráficos (respuesta + panorama general)"
+API_NOVEDADES = "Analista: informe de mercado en PDF (también en Resultados)"
 
 # Inicializar FastAPI
 app = FastAPI(
@@ -1259,6 +1260,46 @@ async def mercado_chat(req: MercadoChatRequest):
         traceback.print_exc()
         raise HTTPException(status_code=502, detail=f"Error del Analista de Mercado: {e}")
     return {"response": resultado["texto"], "graficos": resultado["graficos"], "thread_id": thread_id}
+
+
+class InformeRequest(BaseModel):
+    thread_id: str
+    usuario: Optional[str] = None
+
+
+@app.post("/api/mercado/informe")
+async def mercado_generar_informe(req: InformeRequest):
+    """Genera el Informe de Mercado (PDF) de una conversación y lo guarda para "Resultados"."""
+    thread_id = _validar_thread_id(req.thread_id)
+    dueno = await asyncio.to_thread(analista_memoria.dueno_del_hilo, thread_id)
+    if dueno and req.usuario and dueno != req.usuario:
+        raise HTTPException(status_code=403, detail="Esta conversación pertenece a otro usuario.")
+    try:
+        meta = await analista_informe.generar_informe(thread_id, req.usuario)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"No se pudo generar el informe: {e}")
+    return {**meta, "download_url": f"/api/mercado/informes/{meta['filename']}"}
+
+
+@app.get("/api/mercado/informes")
+async def mercado_listar_informes():
+    """Informes de mercado generados (para la página "Resultados")."""
+    informes = await asyncio.to_thread(analista_informe.listar_informes)
+    for i in informes:
+        i["download_url"] = f"/api/mercado/informes/{i['filename']}"
+    return {"count": len(informes), "informes": informes}
+
+
+@app.get("/api/mercado/informes/{filename}")
+async def mercado_descargar_informe(filename: str):
+    """Descarga un informe de mercado en PDF."""
+    ruta = analista_informe.ruta_informe(filename)
+    if not ruta:
+        raise HTTPException(status_code=404, detail="Informe no encontrado")
+    return FileResponse(path=str(ruta), media_type="application/pdf", filename=filename)
 
 
 @app.get("/api/mercado/panorama")

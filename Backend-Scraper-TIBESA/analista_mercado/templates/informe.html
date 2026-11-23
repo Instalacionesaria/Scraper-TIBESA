@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>{{ informe.titulo }}</title>
+<style>
+  :root {
+    --azul: #0B2545;      /* marca TIBESA */
+    --azul-2: #13315C;
+    --dorado: #C9A961;
+    --texto: #1f2937;
+    --texto-2: #4b5563;
+    --tenue: #6b7280;
+    --linea: #e5e7eb;
+    --fondo: #f8f6f1;
+    --barra: #13315C;     /* un solo tono por gráfico */
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Inter", "Helvetica Neue", Arial, "DejaVu Sans", sans-serif;
+         color: var(--texto); font-size: 11.5pt; line-height: 1.55; }
+  h1, h2, h3 { color: var(--azul); line-height: 1.25; }
+  h2 { font-size: 16pt; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--dorado); }
+  h3 { font-size: 12.5pt; margin: 18px 0 8px; }
+  h2, h3 { break-after: avoid; page-break-after: avoid; }  /* el título nunca queda solo al pie de página */
+  p { margin: 0 0 10px; }
+  .seccion { margin-top: 26px; }
+  .evitar-corte { break-inside: avoid; page-break-inside: avoid; }
+
+  /* Portada */
+  .portada { height: 255mm; display: flex; flex-direction: column; justify-content: space-between;
+             background: linear-gradient(160deg, var(--azul) 0%, var(--azul-2) 100%); color: #fff;
+             border-radius: 10px; padding: 22mm 18mm 20mm; break-after: page; page-break-after: always; }
+  .portada .logo { background: #fff; border-radius: 12px; padding: 10px 14px; width: max-content; }
+  .portada .logo img { height: 54px; display: block; }
+  .portada .etiqueta { color: var(--dorado); letter-spacing: 3px; font-size: 9pt; font-weight: 700; text-transform: uppercase; }
+  .portada h1 { color: #fff; font-size: 30pt; margin: 10px 0 12px; }
+  .portada .subtitulo { color: #dbe4f0; font-size: 14pt; margin: 0; }
+  .portada .datos { display: flex; gap: 28px; border-top: 1px solid rgba(255,255,255,.25); padding-top: 14px; font-size: 10.5pt; }
+  .portada .datos strong { display: block; color: var(--dorado); font-size: 15pt; }
+
+  /* Resumen y recomendaciones */
+  .caja { background: var(--fondo); border-left: 4px solid var(--dorado); border-radius: 6px; padding: 14px 18px; }
+  .caja ol, .caja ul { margin: 0; padding-left: 20px; }
+  .caja li { margin: 6px 0; }
+
+  /* Cifras */
+  .cifras { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .cifra { border: 1px solid var(--linea); border-radius: 8px; padding: 10px 12px; }
+  .cifra .et { color: var(--texto-2); font-size: 9.5pt; }
+  .cifra .va { color: var(--azul); font-size: 17pt; font-weight: 700; }
+  .cifra .no { color: var(--tenue); font-size: 9pt; }
+
+  /* Barras horizontales (ranking, una barra por fila sobre la misma base) */
+  .grafico { border: 1px solid var(--linea); border-radius: 8px; padding: 12px 14px; margin: 12px 0; }
+  .grafico .tit { font-weight: 700; color: var(--azul); margin-bottom: 8px; font-size: 11pt; }
+  .fila { display: grid; grid-template-columns: 34% 1fr auto; align-items: center; gap: 10px; margin: 5px 0; font-size: 10pt; }
+  .fila .et { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--texto); }
+  .fila .pista { height: 11px; }
+  .fila .barra { height: 11px; background: var(--barra); border-radius: 0 4px 4px 0; }
+  .fila .va { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+  .pie { color: var(--tenue); font-size: 8.5pt; margin-top: 6px; }
+
+  /* Tabla de propiedades */
+  table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+  th { text-align: left; background: var(--azul); color: #fff; padding: 6px 8px; font-weight: 600; }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--linea); vertical-align: top; }
+  tr { break-inside: avoid; }
+  td.num { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  a { color: var(--azul-2); }
+
+  .notas { color: var(--tenue); font-size: 9pt; }
+</style>
+</head>
+<body>
+
+{% macro grafico(g) %}
+  {% if g.tipo == 'barras' and g.filas %}
+    {% set maximo = g.filas | map(attribute='valor') | max %}
+    <div class="grafico evitar-corte">
+      <div class="tit">{{ g.titulo }}</div>
+      {% for f in g.filas %}
+        <div class="fila">
+          <span class="et">{{ f.etiqueta }}</span>
+          <span class="pista"><span class="barra" style="display:block;width: {{ [2, (f.valor / maximo * 100)] | max }}%"></span></span>
+          <span class="va">{{ f.valor | valor(g.unidad) }}</span>
+        </div>
+      {% endfor %}
+      <div class="pie">{% if g.orden %}Ordenado de {{ g.orden }}.{% endif %} {% if g.nota %}{{ g.nota }}{% endif %}</div>
+    </div>
+  {% elif g.tipo == 'cifras' %}
+    <div class="grafico evitar-corte">
+      <div class="tit">{{ g.titulo }}</div>
+      <div class="cifras">
+        {% for it in g['items'] if it.valor is not none %}
+          <div class="cifra">
+            <div class="et">{{ it.etiqueta }}</div>
+            <div class="va">{{ it.valor | valor(it.unidad) }}</div>
+            {% if it.nota %}<div class="no">{{ it.nota }}</div>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+{% endmacro %}
+
+<!-- Portada -->
+<section class="portada">
+  <div>
+    {% if logo %}<div class="logo"><img src="{{ logo }}" alt="TIBESA Bienes Raíces"></div>{% endif %}
+  </div>
+  <div>
+    <div class="etiqueta">Informe de mercado · TIBESA Bienes Raíces</div>
+    <h1>{{ informe.titulo }}</h1>
+    <p class="subtitulo">{{ informe.subtitulo }}</p>
+  </div>
+  <div class="datos">
+    <div><strong>{{ fecha }}</strong>Fecha del informe</div>
+    {% if propiedades_analizadas %}<div><strong>{{ "{:,}".format(propiedades_analizadas) }}</strong>Propiedades analizadas</div>{% endif %}
+    <div><strong>Mazatlán</strong>Sinaloa, México</div>
+  </div>
+</section>
+
+<!-- Resumen ejecutivo -->
+<section>
+  <h2>Resumen ejecutivo</h2>
+  <div class="caja evitar-corte">
+    <ol>{% for linea in informe.resumen_ejecutivo %}<li>{{ linea }}</li>{% endfor %}</ol>
+  </div>
+</section>
+
+<!-- Panorama general -->
+<section class="seccion">
+  <h2>Panorama del mercado</h2>
+  <p>Visión general de las propiedades en venta en Mazatlán publicadas en los principales portales inmobiliarios.</p>
+  {% for g in panorama %}{{ grafico(g) }}{% endfor %}
+</section>
+
+<!-- Hallazgos por tema -->
+{% for s in secciones %}
+<section class="seccion">
+  <h2>{{ s.titulo }}</h2>
+  {% for p in s.parrafos %}<p>{{ p }}</p>{% endfor %}
+  {% for g in s.graficos %}{{ grafico(g) }}{% endfor %}
+</section>
+{% endfor %}
+
+<!-- Propiedades destacadas -->
+{% if propiedades %}
+<section class="seccion">
+  <h2>Propiedades destacadas</h2>
+  <table>
+    <thead><tr><th>#</th><th>Propiedad</th><th>Precio</th><th>m²</th><th>Precio por m²</th><th>Zona · Portal</th></tr></thead>
+    <tbody>
+    {% for p in propiedades %}
+      <tr>
+        <td class="num">{{ loop.index }}</td>
+        <td>{% if p.url %}<a href="{{ p.url }}">{{ p.titulo }}</a>{% else %}{{ p.titulo }}{% endif %}</td>
+        <td class="num">{{ p.precio | valor('MXN') }}</td>
+        <td class="num">{% if p.m2 %}{{ "{:,.0f}".format(p.m2) }}{% else %}—{% endif %}</td>
+        <td class="num">{% if p.precio_m2 %}{{ p.precio_m2 | valor('MXN/m²') }}{% else %}—{% endif %}</td>
+        <td>{{ p.zona }} · {{ p.portal }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<!-- Recomendaciones -->
+{% if informe.recomendaciones %}
+<section class="seccion evitar-corte">
+  <h2>Recomendaciones</h2>
+  <div class="caja evitar-corte">
+    <ul>{% for r in informe.recomendaciones %}<li>{{ r }}</li>{% endfor %}</ul>
+  </div>
+</section>
+{% endif %}
+
+<!-- Gráficos adicionales -->
+{% if anexo %}
+<section class="seccion">
+  <h2>Anexo: datos adicionales</h2>
+  {% for g in anexo %}{{ grafico(g) }}{% endfor %}
+</section>
+{% endif %}
+
+<!-- Notas metodológicas -->
+<section class="seccion notas evitar-corte">
+  <h3>Notas sobre los datos</h3>
+  <p>Los precios son <strong>precios de lista</strong> publicados en portales inmobiliarios (lo que piden los vendedores), no precios de cierre.
+  "Precio típico" significa que la mitad de las propiedades se ofrece por debajo de ese valor. Los anuncios en dólares se convirtieron a
+  pesos con un tipo de cambio de 1 USD = {{ tipo_cambio }} MXN. Se descartaron anuncios repetidos entre portales y precios no válidos.
+  Los terrenos de 1 hectárea o más se analizan aparte porque corresponden a otro mercado.</p>
+  <p>Elaborado por TIBESA Bienes Raíces · {{ fecha }}.</p>
+</section>
+
+</body>
+</html>

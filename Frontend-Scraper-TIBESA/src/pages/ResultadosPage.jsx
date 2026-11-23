@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
-import { BarChart3, FileText, Download, Loader2, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react'
+import { BarChart3, FileText, Download, Loader2, CheckCircle2, AlertCircle, Sparkles, LineChart } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { descargarArchivo, listarInformes } from '../lib/mercadoApi'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
@@ -9,10 +11,12 @@ export default function ResultadosPage() {
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState(null)
   const [justGenerated, setJustGenerated] = useState(null)
+  const [informes, setInformes] = useState(null)
 
   // Carga inicial
   useEffect(() => {
     fetchStatus()
+    listarInformes().then((d) => setInformes(d.informes || [])).catch(() => setInformes([]))
   }, [])
 
   async function fetchStatus() {
@@ -166,6 +170,53 @@ export default function ResultadosPage() {
           <div className="mt-6 bg-red-500/20 border border-red-400/40 rounded-lg p-4 flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-red-300 flex-shrink-0" />
             <div className="text-sm text-red-100">{error}</div>
+          </div>
+        )}
+      </div>
+
+      {/* Informes del Analista de Mercado */}
+      <div className="bg-white border border-gray-200 rounded-xl p-6 mb-6">
+        <h3 className="text-base font-semibold text-gray-800 mb-1 flex items-center gap-2">
+          <LineChart className="w-4 h-4 text-emerald-600" />
+          Informes del Analista de Mercado
+          <span className="ml-auto text-xs font-normal text-gray-400">
+            {informes?.length ?? 0} {informes?.length === 1 ? 'informe' : 'informes'}
+          </span>
+        </h3>
+        <p className="text-sm text-gray-500 mb-4">
+          Se crean desde el <Link to="/mercado" className="text-emerald-700 underline">Analista de Mercado</Link> con el botón «Descargar informe (PDF)».
+        </p>
+
+        {informes === null ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-gray-400">
+            <Loader2 className="w-4 h-4 animate-spin" /> Cargando informes…
+          </div>
+        ) : informes.length === 0 ? (
+          <div className="text-center py-8 text-sm text-gray-400">Aún no se ha generado ningún informe</div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {informes.map((inf) => (
+              <div key={inf.filename} className="flex items-center justify-between py-3 hover:bg-gray-50 px-2 -mx-2 rounded transition-colors">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <LineChart className="w-5 h-5 text-emerald-700" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-medium text-[15px] text-gray-800 truncate">{inf.titulo}</div>
+                    <div className="text-sm text-gray-500 truncate">
+                      {formatDate(inf.created_at)} · {inf.subtitulo}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => descargarArchivo(inf.download_url)}
+                  className="flex items-center gap-2 bg-gray-100 hover:bg-emerald-600 hover:text-white text-gray-700 font-medium px-4 py-2 rounded-md transition-colors text-sm flex-shrink-0 cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  Descargar
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </div>

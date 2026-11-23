@@ -43,3 +43,32 @@ export function getConversacion(threadId, usuario) {
 export function borrarConversacion(threadId, usuario) {
   return request(`/api/mercado/conversaciones/${encodeURIComponent(threadId)}${q(usuario)}`, { method: 'DELETE' })
 }
+
+// Informe de Mercado en PDF (se guarda también en "Resultados").
+// → { filename, titulo, subtitulo, created_at, size_bytes, download_url }
+export function generarInforme({ threadId, usuario }) {
+  return request('/api/mercado/informe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ thread_id: threadId, usuario }),
+  })
+}
+
+// → { count, informes: [{ filename, titulo, subtitulo, preguntas, created_at, size_bytes, download_url }] }
+export function listarInformes() {
+  return request('/api/mercado/informes')
+}
+
+export function urlDescarga(downloadUrl) {
+  return `${API_BASE}${downloadUrl}`
+}
+
+// Descarga el PDF sin salir de la página (el backend responde con Content-Disposition: attachment).
+export function descargarArchivo(downloadUrl) {
+  const a = document.createElement('a')
+  a.href = urlDescarga(downloadUrl)
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}

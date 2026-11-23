@@ -57,11 +57,17 @@ from leads.routes import router as leads_router
 
 load_dotenv()
 
+# Versión visible en GET / — SUBIRLA en cada cambio del backend para saber,
+# abriendo la URL de la API, si EasyPanel ya desplegó lo último.
+API_VERSION = "3.1.0"
+API_ACTUALIZADO = "2026-11-22"
+API_NOVEDADES = "Chat IA en el scraper de Facebook"
+
 # Inicializar FastAPI
 app = FastAPI(
     title="API Scraper de Propiedades Multi-Sitio",
     description="API con streaming en tiempo real para scrapear propiedades inmobiliarias",
-    version="3.0.0"
+    version=API_VERSION
 )
 
 # ========================================
@@ -517,7 +523,9 @@ async def _extraer_urls_propiedades_com(config: dict) -> List[str]:
 async def root():
     return {
         "message": "API Scraper de Propiedades - TIBESA v4",
-        "version": "3.0.0",
+        "version": API_VERSION,
+        "actualizado": API_ACTUALIZADO,
+        "novedades": API_NOVEDADES,
         "sitios_soportados": list(SCRAPERS_MAP.keys()),
     }
 

@@ -65,9 +65,9 @@ load_dotenv()
 
 # Versión visible en GET / — SUBIRLA en cada cambio del backend para saber,
 # abriendo la URL de la API, si EasyPanel ya desplegó lo último.
-API_VERSION = "3.3.0"
+API_VERSION = "3.3.1"
 API_ACTUALIZADO = "2026-11-23"
-API_NOVEDADES = "Analista de Mercado con histórico de conversaciones (esquema tibesa)"
+API_NOVEDADES = "Arreglo zona horaria (Analista y chat de Facebook fallaban en el servidor)"
 
 # Inicializar FastAPI
 app = FastAPI(

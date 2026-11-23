@@ -8,10 +8,8 @@ El histórico de cada conversación lo guarda el checkpointer (`memoria.py`) baj
 
 import os
 import threading
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from zoneinfo import ZoneInfo
 
 import yaml
 from langchain.agents import create_agent
@@ -21,6 +19,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from .herramientas import HERRAMIENTAS
 from .memoria import obtener_checkpointer
+from utils.zona_horaria import ahora_mazatlan
 
 
 DEFAULT_MODEL = "gpt-4.1"
@@ -35,7 +34,7 @@ _agente = None
 def _prompt_con_fecha(request: ModelRequest) -> str:
     """El prompt se lee en cada llamada para que la fecha de hoy siempre sea la correcta."""
     cfg = yaml.safe_load(PROMPT_PATH.read_text(encoding="utf-8"))
-    hoy = datetime.now(ZoneInfo("America/Mazatlan")).strftime("%d/%m/%Y")
+    hoy = ahora_mazatlan().strftime("%d/%m/%Y")
     return cfg["system_prompt"].replace("{fecha_hoy}", hoy)
 
 

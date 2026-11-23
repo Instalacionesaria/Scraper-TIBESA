@@ -323,10 +323,10 @@ _TAREAS_SL: set = set()  # referencias para que el GC no corte las tareas
 def _fecha_legible(iso: str) -> str:
     """'2026-11-06T20:08:00.009' (UTC) → '06/11/2026 a las 13:08' (hora de Mazatlán)."""
     import datetime
-    from zoneinfo import ZoneInfo
+    from utils.zona_horaria import TZ_MAZATLAN
     try:
         dt = datetime.datetime.fromisoformat(iso).replace(tzinfo=datetime.timezone.utc)
-        return dt.astimezone(ZoneInfo("America/Mazatlan")).strftime("%d/%m/%Y a las %H:%M")
+        return dt.astimezone(TZ_MAZATLAN).strftime("%d/%m/%Y a las %H:%M")
     except Exception:
         return (iso or "")[:16].replace("T", " ")
 

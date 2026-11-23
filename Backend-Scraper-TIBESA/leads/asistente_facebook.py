@@ -8,12 +8,12 @@ URL de la Biblioteca de Anuncios de Facebook (no la arma el LLM, para que siempr
 sea válida). NUNCA lanza el scrapeo: solo llena los campos.
 """
 
-from datetime import datetime
 from typing import List, Optional
-from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from pydantic import BaseModel, Field
+
+from utils.zona_horaria import ahora_mazatlan
 
 from .asistente_ia import MensajeChat, invocar_estructurado
 
@@ -117,6 +117,20 @@ def construir_url(palabra_clave: str, pais: str, solo_activos: bool = True) -> s
     return f"{BASE_URL_BIBLIOTECA}?{urlencode(params)}"
 
 
+def _recortar_etiqueta(etiqueta: str) -> str:
+    """Deja la etiqueta en MAX_ETIQUETA_LEN sin cortar palabras (primero quita el sufijo " - fecha")."""
+    etiqueta = " ".join(etiqueta.split())
+    if len(etiqueta) <= MAX_ETIQUETA_LEN:
+        return etiqueta
+    if " - " in etiqueta:
+        base, sufijo = etiqueta.rsplit(" - ", 1)
+        if len(base) <= MAX_ETIQUETA_LEN:
+            return base
+        etiqueta = base
+    cortada = etiqueta[:MAX_ETIQUETA_LEN + 1].rsplit(" ", 1)[0]
+    return cortada.rstrip(" -") or etiqueta[:MAX_ETIQUETA_LEN]
+
+
 def responder(mensajes: List[MensajeChat], valores_actuales: dict) -> RespuestaAsistente:
     """Llama al LLM con el historial y devuelve respuesta + campos del formulario."""
     url_actual = (valores_actuales.get("urlBiblioteca") or "").strip()
@@ -129,7 +143,7 @@ def responder(mensajes: List[MensajeChat], valores_actuales: dict) -> RespuestaA
         f"- pais (según la URL): {previo.get('pais') or '(vacío)'}",
         f"- etiqueta: {etiqueta_actual or '(vacío)'}",
     ])
-    ahora = datetime.now(ZoneInfo("America/Mazatlan"))
+    ahora = ahora_mazatlan()
     mes_anio = f"{MESES[ahora.month - 1]} {ahora.year}"
     prompt = SYSTEM_PROMPT.format(valores_actuales=valores_txt, hoy=ahora.strftime("%d/%m/%Y"), mes_anio=mes_anio)
     resultado = invocar_estructurado(prompt, RespuestaLLM, mensajes)
@@ -149,6 +163,6 @@ def responder(mensajes: List[MensajeChat], valores_actuales: dict) -> RespuestaA
         salida.palabra_clave = palabra
         salida.pais = pais
     if c.etiqueta:
-        salida.etiqueta = c.etiqueta.strip()[:MAX_ETIQUETA_LEN]
+        salida.etiqueta = _recortar_etiqueta(c.etiqueta)
 
     return RespuestaAsistente(respuesta=resultado.respuesta, campos=salida, listo=resultado.listo)

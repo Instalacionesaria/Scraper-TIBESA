@@ -17,6 +17,8 @@ langchain-openai>=0.3.0
 langgraph-checkpoint-postgres>=3.0
 psycopg[binary,pool]>=3.2
 python-dotenv==1.0.0
+# Base de zonas horarias (la imagen Docker no la trae): fechas en hora de Mazatlán
+tzdata>=2024.1
 
 # Módulo de Leads (Google Places, Facebook Ads/Pages, CRM TIBESA)
 # Fijado a <2.0: en 2.x/3.x `.start()` devuelve un objeto Run (no dict) y
